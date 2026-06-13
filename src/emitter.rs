@@ -1,12 +1,18 @@
 use std::collections::HashMap;
 
 use crate::lowering::lower_method_calls;
+use crate::policy::ExecutionPolicy;
 use crate::{BindingPattern, ClosureCapture, Expr, MatchArm, Param, Program, Statement, Type};
 
 pub fn transpile(program: &Program) -> String {
+    transpile_with_policy(program, &ExecutionPolicy::deny_all())
+}
+
+pub fn transpile_with_policy(program: &Program, policy: &ExecutionPolicy) -> String {
     let program = lower_method_calls(program);
     let program = mangle_function_locals(&program);
     let mut out = String::from("#!/usr/bin/env bash\nset -euo pipefail\nargs=(\"$@\")\n");
+    emit_policy_runtime(&mut out, policy);
     if program_needs_runtime(&program) {
         out.push_str(CLOSURE_RUNTIME);
     }
@@ -15,6 +21,67 @@ pub fn transpile(program: &Program) -> String {
         emit_statement(&mut out, statement, EmitScope::TopLevel);
     }
     out
+}
+
+fn emit_policy_runtime(out: &mut String, policy: &ExecutionPolicy) {
+    out.push_str("__nacre_read_roots=(");
+    for root in policy.read_roots() {
+        out.push(' ');
+        emit_bash_string(out, &root.to_string_lossy());
+    }
+    out.push_str(" )\n__nacre_write_roots=(");
+    for root in policy.write_roots() {
+        out.push(' ');
+        emit_bash_string(out, &root.to_string_lossy());
+    }
+    out.push_str(
+        r#" )
+__nacre_resolve_guarded_path() {
+  local __nacre_path="$1"
+  if [[ "$__nacre_path" != /* ]]; then
+    __nacre_path="$PWD/$__nacre_path"
+  fi
+  if [[ -L "$__nacre_path" ]]; then
+    return 1
+  fi
+  if [[ -d "$__nacre_path" ]]; then
+    (cd -P -- "$__nacre_path" && pwd -P)
+    return
+  fi
+  local __nacre_parent="${__nacre_path%/*}"
+  local __nacre_base="${__nacre_path##*/}"
+  if [[ ! -d "$__nacre_parent" ]]; then
+    return 1
+  fi
+  __nacre_parent="$(cd -P -- "$__nacre_parent" && pwd -P)" || return 1
+  printf '%s/%s\n' "$__nacre_parent" "$__nacre_base"
+}
+
+__nacre_assert_path_in_roots() {
+  local __nacre_access="$1"
+  local __nacre_path="$2"
+  local __nacre_resolved
+  __nacre_resolved="$(__nacre_resolve_guarded_path "$__nacre_path")" || {
+    printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+    return 126
+  }
+  local -a __nacre_roots
+  if [[ "$__nacre_access" == read ]]; then
+    __nacre_roots=("${__nacre_read_roots[@]}")
+  else
+    __nacre_roots=("${__nacre_write_roots[@]}")
+  fi
+  local __nacre_root
+  for __nacre_root in "${__nacre_roots[@]}"; do
+    if [[ "$__nacre_resolved" == "$__nacre_root" || "$__nacre_resolved" == "$__nacre_root/"* ]]; then
+      return 0
+    fi
+  done
+  printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+  return 126
+}
+"#,
+    );
 }
 
 fn program_needs_runtime(program: &Program) -> bool {
@@ -583,6 +650,24 @@ fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, String>) -> Expr
         },
         Expr::CommandResult { command } => Expr::CommandResult {
             command: mangle_shell_interpolations(command, local_names),
+        },
+        Expr::AllowedCommand {
+            group,
+            command,
+            args,
+            program,
+            read_args,
+            write_args,
+        } => Expr::AllowedCommand {
+            group: group.clone(),
+            command: command.clone(),
+            args: args
+                .iter()
+                .map(|arg| mangle_local_expr(arg, local_names))
+                .collect(),
+            program: program.clone(),
+            read_args: read_args.clone(),
+            write_args: write_args.clone(),
         },
         Expr::AsyncCommand(command) => {
             Expr::AsyncCommand(mangle_shell_interpolations(command, local_names))
@@ -2599,6 +2684,16 @@ fn destructure_source_name(expr: &Expr) -> String {
 fn emit_discard_expr(out: &mut String, expr: &Expr) {
     match expr {
         Expr::MatchGuardResult(value) => emit_discard_expr(out, value),
+        Expr::AllowedCommand {
+            program,
+            args,
+            read_args,
+            write_args,
+            ..
+        } => {
+            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            out.push('\n');
+        }
         Expr::Command { command, checked } => {
             emit_shell_command(out, command);
             out.push_str(" >/dev/null");
@@ -3004,6 +3099,13 @@ fn emit_expr(out: &mut String, expr: &Expr) {
         Expr::DefaultTry { value, fallback } => emit_default_try(out, value, fallback),
         Expr::String(value) => emit_string(out, value),
         Expr::RawString(value) => emit_bash_string(out, value),
+        Expr::AllowedCommand {
+            program,
+            args,
+            read_args,
+            write_args,
+            ..
+        } => emit_allowed_command(out, program.as_deref(), args, read_args, write_args, true),
         Expr::Command { command, checked } => {
             out.push_str("\"$(");
             emit_shell_command(out, command);
@@ -3267,6 +3369,53 @@ fn emit_expr(out: &mut String, expr: &Expr) {
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
         Expr::Closure { name, captures } => emit_closure(out, name, captures),
         Expr::Lambda { .. } => unreachable!("lambdas are lowered before emission"),
+    }
+}
+
+fn emit_allowed_command(
+    out: &mut String,
+    program: Option<&str>,
+    args: &[Expr],
+    read_args: &[usize],
+    write_args: &[usize],
+    capture: bool,
+) {
+    if capture {
+        out.push_str("\"$(");
+    }
+    let Some(program) = program else {
+        out.push_str("printf 'nacre: unresolved command policy\\n' >&2; exit 126");
+        if capture {
+            out.push_str(")\"");
+        }
+        return;
+    };
+
+    for (index, arg) in args.iter().enumerate() {
+        out.push_str("__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push('=');
+        emit_expr(out, arg);
+        out.push_str("; ");
+    }
+    for index in read_args {
+        out.push_str("__nacre_assert_path_in_roots read \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\" || exit $?; ");
+    }
+    for index in write_args {
+        out.push_str("__nacre_assert_path_in_roots write \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\" || exit $?; ");
+    }
+    emit_bash_string(out, program);
+    for index in 0..args.len() {
+        out.push_str(" \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push('"');
+    }
+    if capture {
+        out.push_str(")\"");
     }
 }
 
@@ -3643,23 +3792,23 @@ fn emit_inline_declaration_copy(out: &mut String, source: &str, target: &str, ty
 }
 
 fn emit_path_exists(out: &mut String, path: &Expr) {
-    out.push_str("$(if [ -e ");
-    emit_call_arg(out, path);
-    out.push_str(" ]; then printf true; else printf false; fi)");
+    out.push_str("$(__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; if [ -e \"$__nacre_guarded_path\" ]; then printf true; else printf false; fi)");
 }
 
 fn emit_fs_test(out: &mut String, test: &str, path: &Expr) {
-    out.push_str("$(if [ ");
+    out.push_str("$(__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; if [ ");
     out.push_str(test);
-    out.push(' ');
-    emit_call_arg(out, path);
-    out.push_str(" ]; then printf true; else printf false; fi)");
+    out.push_str(" \"$__nacre_guarded_path\" ]; then printf true; else printf false; fi)");
 }
 
 fn emit_fs_size(out: &mut String, path: &Expr) {
-    out.push_str("$(wc -c < ");
-    emit_call_arg(out, path);
-    out.push_str(" | tr -d '[:space:]')");
+    out.push_str("$(__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; wc -c < \"$__nacre_guarded_path\" | tr -d '[:space:]')");
 }
 
 fn emit_fs_read_lines_binding(
@@ -3674,11 +3823,13 @@ fn emit_fs_read_lines_binding(
         out.push_str(binding);
         out.push('\n');
     }
-    out.push_str("mapfile -t ");
+    out.push_str("__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str(
+        "\n__nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?\nmapfile -t ",
+    );
     out.push_str(binding);
-    out.push_str(" < ");
-    emit_call_arg(out, path);
-    out.push('\n');
+    out.push_str(" < \"$__nacre_guarded_path\"\n");
     if readonly && !local {
         out.push_str("readonly -a ");
         out.push_str(binding);
@@ -3687,9 +3838,9 @@ fn emit_fs_read_lines_binding(
 }
 
 fn emit_fs_read_lines_value(out: &mut String, path: &Expr) {
-    out.push_str("\"$(cat ");
-    emit_call_arg(out, path);
-    out.push_str(")\"");
+    out.push_str("\"$(__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; printf '%s' \"$(<\"$__nacre_guarded_path\")\")\"");
 }
 
 fn emit_fs_list_binding(out: &mut String, binding: &str, path: &Expr, readonly: bool, local: bool) {
@@ -3717,9 +3868,9 @@ fn emit_fs_list_value(out: &mut String, path: &Expr) {
 }
 
 fn emit_fs_list_command(out: &mut String, path: &Expr) {
-    out.push_str("find ");
-    emit_call_arg(out, path);
-    out.push_str(" -mindepth 1 -maxdepth 1 -print | sort");
+    out.push_str("__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; find \"$__nacre_guarded_path\" -mindepth 1 -maxdepth 1 -print | sort");
 }
 
 fn emit_fs_write_lines_statement(out: &mut String, path: &Expr, lines: &Expr) {
@@ -3745,31 +3896,33 @@ fn emit_fs_append_lines_expr(out: &mut String, path: &Expr, lines: &Expr) {
 }
 
 fn emit_fs_write_lines_command(out: &mut String, path: &Expr, lines: &Expr) {
+    out.push_str("__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots write \"$__nacre_guarded_path\" || exit $?; ");
     if let Expr::FsReadLines { path: source } = lines {
-        out.push_str("cat ");
-        emit_call_arg(out, source);
-        out.push_str(" > ");
-        emit_call_arg(out, path);
+        out.push_str("__nacre_guarded_source=");
+        emit_expr(out, source);
+        out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_source\" || exit $?; cat \"$__nacre_guarded_source\" > \"$__nacre_guarded_path\"");
         return;
     }
     out.push_str("printf '%s\\n'");
     emit_array_words(out, lines);
-    out.push_str(" > ");
-    emit_call_arg(out, path);
+    out.push_str(" > \"$__nacre_guarded_path\"");
 }
 
 fn emit_fs_append_lines_command(out: &mut String, path: &Expr, lines: &Expr) {
+    out.push_str("__nacre_guarded_path=");
+    emit_expr(out, path);
+    out.push_str("; __nacre_assert_path_in_roots write \"$__nacre_guarded_path\" || exit $?; ");
     if let Expr::FsReadLines { path: source } = lines {
-        out.push_str("cat ");
-        emit_call_arg(out, source);
-        out.push_str(" >> ");
-        emit_call_arg(out, path);
+        out.push_str("__nacre_guarded_source=");
+        emit_expr(out, source);
+        out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_source\" || exit $?; cat \"$__nacre_guarded_source\" >> \"$__nacre_guarded_path\"");
         return;
     }
     out.push_str("printf '%s\\n'");
     emit_array_words(out, lines);
-    out.push_str(" >> ");
-    emit_call_arg(out, path);
+    out.push_str(" >> \"$__nacre_guarded_path\"");
 }
 
 fn emit_array_words(out: &mut String, expr: &Expr) {
@@ -6364,6 +6517,7 @@ fn emit_array_element(out: &mut String, expr: &Expr) {
         | Expr::Match { .. }
         | Expr::Not(_)
         | Expr::BitNot(_)
+        | Expr::AllowedCommand { .. }
         | Expr::Command { .. }
         | Expr::CommandResult { .. }
         | Expr::AsyncCommand(_)
@@ -6526,6 +6680,7 @@ fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(String, String)>
         | Expr::JsonParse { .. }
         | Expr::JsonStringify { .. }
         | Expr::JsonStringifyValue { .. }
+        | Expr::AllowedCommand { .. }
         | Expr::Command { .. }
         | Expr::CommandResult { .. }
         | Expr::AsyncCommand(_)
@@ -7811,6 +7966,7 @@ fn emit_call_arg(out: &mut String, arg: &Expr) {
         | Expr::Match { .. }
         | Expr::Not(_)
         | Expr::BitNot(_)
+        | Expr::AllowedCommand { .. }
         | Expr::Command { .. }
         | Expr::CommandResult { .. }
         | Expr::AsyncCommand(_)

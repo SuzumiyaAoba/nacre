@@ -210,6 +210,14 @@ pub enum Expr {
     CommandResult {
         command: String,
     },
+    AllowedCommand {
+        group: String,
+        command: String,
+        args: Vec<Expr>,
+        program: Option<String>,
+        read_args: Vec<usize>,
+        write_args: Vec<usize>,
+    },
     AsyncCommand(String),
     Await(String),
     Pipeline {

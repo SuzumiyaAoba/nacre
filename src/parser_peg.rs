@@ -468,10 +468,23 @@ fn validate_program(program: &Program) -> Result<(), CompileError> {
             | Statement::Expr(expr)
             | Statement::TryResult(expr)
             | Statement::Return(expr) => validate_expr(expr, *line)?,
-            Statement::TryPipeline { input, .. } | Statement::TryPipelineResult { input, .. } => {
-                if let Some(input) = input {
-                    validate_expr(input, *line)?;
-                }
+            Statement::TryCommand(_)
+            | Statement::TryCommandResult(_)
+            | Statement::TryPipeline { .. }
+            | Statement::TryPipelineResult { .. }
+            | Statement::Command(_)
+            | Statement::Redirect { .. } => {
+                return Err(CompileError::new(
+                    *line,
+                    "$sh commands and shell pipelines are disabled; use a policy-approved `run.<group>.<command>(...)` call"
+                        .to_string(),
+                ));
+            }
+            Statement::Raw(_) => {
+                return Err(CompileError::new(
+                    *line,
+                    "raw Bash blocks are disabled in the safe language profile".to_string(),
+                ));
             }
             _ => {}
         }
@@ -562,12 +575,24 @@ fn validate_expr(expr: &Expr, line: usize) -> Result<(), CompileError> {
             }
             Ok(())
         }
-        Expr::Call { args, .. } | Expr::Variant { args, .. } => {
+        Expr::Call { args, .. }
+        | Expr::Variant { args, .. }
+        | Expr::AllowedCommand { args, .. } => {
             for arg in args {
                 validate_expr(arg, line)?;
             }
             Ok(())
         }
+        Expr::Command { .. }
+        | Expr::CommandResult { .. }
+        | Expr::AsyncCommand(_)
+        | Expr::Pipeline { .. }
+        | Expr::TryPipeline { .. }
+        | Expr::PipelineResult { .. } => Err(CompileError::new(
+            line,
+            "$sh commands and shell pipelines are disabled; use a policy-approved `run.<group>.<command>(...)` call"
+                .to_string(),
+        )),
         Expr::Lambda { params, body } => {
             for (index, param) in params.iter().enumerate() {
                 if params[..index].contains(param) {
@@ -752,6 +777,16 @@ fn ident_name(value: &Expr) -> Option<&str> {
 }
 
 fn call_expr(name: String, mut args: Vec<Expr>) -> Expr {
+    if let Some((group, command)) = allowed_command_name(&name) {
+        return Expr::AllowedCommand {
+            group,
+            command,
+            args,
+            program: None,
+            read_args: Vec::new(),
+            write_args: Vec::new(),
+        };
+    }
     match (name.as_str(), args.len()) {
         ("Some", 1) => Expr::Some(Box::new(args.remove(0))),
         ("Ok", 1) => Expr::Ok(Box::new(args.remove(0))),
@@ -814,6 +849,19 @@ fn call_expr(name: String, mut args: Vec<Expr>) -> Expr {
         }
         _ => Expr::Call { name, args },
     }
+}
+
+fn allowed_command_name(name: &str) -> Option<(String, String)> {
+    let mut parts = name.split('.');
+    if parts.next()? != "run" {
+        return None;
+    }
+    let group = parts.next()?;
+    let command = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((group.to_string(), command.to_string()))
 }
 
 fn named_or_value<T>(

@@ -14,19 +14,27 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    match args.as_slice() {
+    let (policy, positional) = match args.as_slice() {
+        [flag, policy, rest @ ..] if flag == "--policy" => {
+            let policy = nacre::ExecutionPolicy::from_file(Path::new(policy))
+                .map_err(|error| error.to_string())?;
+            (policy, rest)
+        }
+        _ => (nacre::ExecutionPolicy::deny_all(), args.as_slice()),
+    };
+    match positional {
         [input] => {
-            let output =
-                nacre::compile_file(Path::new(input)).map_err(|error| error.to_string())?;
+            let output = nacre::compile_file_with_policy(Path::new(input), &policy)
+                .map_err(|error| error.to_string())?;
             print!("{output}");
             Ok(())
         }
         [input, output] => {
-            let compiled =
-                nacre::compile_file(Path::new(input)).map_err(|error| error.to_string())?;
+            let compiled = nacre::compile_file_with_policy(Path::new(input), &policy)
+                .map_err(|error| error.to_string())?;
             fs::write(output, compiled)
                 .map_err(|error| format!("failed to write {output}: {error}"))
         }
-        _ => Err("usage: nacre <input.ncr> [output.sh]".to_string()),
+        _ => Err("usage: nacre [--policy policy.toml] <input.ncr> [output.sh]".to_string()),
     }
 }

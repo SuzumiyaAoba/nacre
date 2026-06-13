@@ -15,9 +15,14 @@ This repository currently contains:
 ## Quick Start
 
 ```bash
-cargo run -- docs/examples/hello.ncr
-cargo run -- docs/examples/hello.ncr /tmp/hello.sh
-bash /tmp/hello.sh
+cargo run -- examples/pure.ncr /tmp/pure.sh
+bash /tmp/pure.sh
+```
+
+Commands and filesystem operations require an externally reviewed TOML policy:
+
+```bash
+cargo run -- --policy nacre-policy.toml input.ncr output.sh
 ```
 
 ## Documentation
@@ -27,6 +32,7 @@ bash /tmp/hello.sh
 - Tutorial: [docs/tutorial.md](docs/tutorial.md)
 - Language reference: [docs/language-reference.md](docs/language-reference.md)
 - CLI reference: [docs/cli.md](docs/cli.md)
+- Execution policy: [docs/security-policy.md](docs/security-policy.md)
 - Self-compilation: [docs/self-compilation.md](docs/self-compilation.md)
 - Testing and coverage: [docs/testing-and-coverage.md](docs/testing-and-coverage.md)
 - Current limitations: [docs/limitations.md](docs/limitations.md)

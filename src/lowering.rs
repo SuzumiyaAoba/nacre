@@ -213,6 +213,21 @@ fn lower_statement(statement: &Statement, functions: &HashSet<String>) -> Statem
 
 fn lower_expr(expr: &Expr, functions: &HashSet<String>) -> Expr {
     match expr {
+        Expr::AllowedCommand {
+            group,
+            command,
+            args,
+            program,
+            read_args,
+            write_args,
+        } => Expr::AllowedCommand {
+            group: group.clone(),
+            command: command.clone(),
+            args: args.iter().map(|arg| lower_expr(arg, functions)).collect(),
+            program: program.clone(),
+            read_args: read_args.clone(),
+            write_args: write_args.clone(),
+        },
         Expr::Call { name, args } => lower_call(name, args, functions),
         Expr::Array(values) => Expr::Array(
             values

@@ -7,6 +7,7 @@ mod error;
 mod lowering;
 mod parser;
 mod parser_peg;
+mod policy;
 
 use std::collections::HashSet;
 use std::fs;
@@ -16,22 +17,37 @@ pub use ast::{
     BinaryOp, BindingPattern, ClosureCapture, DoStep, Expr, ImplMethod, MatchArm, Param, Program,
     Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
-pub use checker::type_check;
-pub use emitter::transpile;
+pub use checker::{type_check, type_check_with_policy};
+pub use emitter::{transpile, transpile_with_policy};
 pub use error::CompileError;
 pub use parser::parse;
+pub use policy::ExecutionPolicy;
 
 pub fn compile_source(source: &str) -> Result<String, CompileError> {
+    compile_source_with_policy(source, &ExecutionPolicy::deny_all())
+}
+
+pub fn compile_source_with_policy(
+    source: &str,
+    policy: &ExecutionPolicy,
+) -> Result<String, CompileError> {
     let program = parse(source)?;
-    let program = checker::type_check_and_lower(&program)?;
-    Ok(transpile(&program))
+    let program = checker::type_check_and_lower_with_policy(&program, policy)?;
+    Ok(transpile_with_policy(&program, policy))
 }
 
 pub fn compile_file(path: &Path) -> Result<String, CompileError> {
+    compile_file_with_policy(path, &ExecutionPolicy::deny_all())
+}
+
+pub fn compile_file_with_policy(
+    path: &Path,
+    policy: &ExecutionPolicy,
+) -> Result<String, CompileError> {
     let mut seen = HashSet::new();
     let program = parse_file_expanded(path, &mut seen)?;
-    let program = checker::type_check_and_lower(&program)?;
-    Ok(transpile(&program))
+    let program = checker::type_check_and_lower_with_policy(&program, policy)?;
+    Ok(transpile_with_policy(&program, policy))
 }
 
 fn parse_file_expanded(
@@ -1244,6 +1260,35 @@ fn namespace_expr(
         },
         Expr::AsyncCommand(_) => expr.clone(),
         Expr::CommandResult { .. } => expr.clone(),
+        Expr::AllowedCommand {
+            group,
+            command,
+            args,
+            program,
+            read_args,
+            write_args,
+        } => Expr::AllowedCommand {
+            group: group.clone(),
+            command: command.clone(),
+            args: args
+                .iter()
+                .map(|arg| {
+                    namespace_expr(
+                        arg,
+                        namespace,
+                        function_names,
+                        binding_names,
+                        type_names,
+                        trait_names,
+                        local_names,
+                        local_type_names,
+                    )
+                })
+                .collect(),
+            program: program.clone(),
+            read_args: read_args.clone(),
+            write_args: write_args.clone(),
+        },
         Expr::Await(name) => Expr::Await(qualify_ref_name(
             name,
             namespace,

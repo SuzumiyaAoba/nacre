@@ -5,7 +5,7 @@ The `nacre` binary compiles `.ncr` source to Bash.
 ## Usage
 
 ```bash
-nacre <input.ncr> [output.sh]
+nacre [--policy policy.toml] <input.ncr> [output.sh]
 ```
 
 In this repository, run it through Cargo:
@@ -13,7 +13,11 @@ In this repository, run it through Cargo:
 ```bash
 cargo run -- <input.ncr>
 cargo run -- <input.ncr> <output.sh>
+cargo run -- --policy policy.toml <input.ncr> <output.sh>
 ```
+
+Without `--policy`, command execution and filesystem access are denied. See the
+[Execution Policy](security-policy.md) reference.
 
 ## Compile to Stdout
 

@@ -7,8 +7,12 @@ trap 'rm -rf "$tmpdir"' EXIT
 for source in docs/examples/*.ncr; do
   name="$(basename "$source" .ncr)"
   output="$tmpdir/$name.sh"
-  cargo run --quiet -- "$source" "$output"
-  bash "$output" >/dev/null
+  error="$tmpdir/$name.err"
+  if cargo run --quiet -- "$source" "$output" 2>"$error"; then
+    bash "$output" >/dev/null
+  else
+    grep -Eq '\$sh commands and shell pipelines are disabled|raw Bash blocks are disabled' "$error"
+  fi
 done
 
 mdbook build

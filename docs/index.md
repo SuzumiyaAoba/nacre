@@ -5,15 +5,15 @@
 <p class="nacre-lede">
 Nacre is a Rust-implemented compiler that translates a compact `.ncr` source
 file into a standalone Bash script. It combines typed, structured expressions
-with direct access to the commands and pipelines used in everyday automation.
+with externally reviewed command and filesystem capabilities.
 </p>
 
 The current implementation is intentionally small and verifiable. It supports
 immutable and mutable variables, primitive and structured expressions,
-statement-level control flow, command execution, raw Bash blocks, a CLI
-compiler, and a bootstrap source that can compile itself through the generated
-Bash compiler. Source syntax is parsed from a declarative PEG grammar using
-`rust-peg`.
+statement-level control flow, policy-approved command execution, and a CLI
+compiler. Source syntax is parsed from a declarative PEG grammar using
+`rust-peg`. `$sh`, pipelines, redirects, and raw Bash blocks are rejected by the
+safe language profile.
 
 ## What to Read
 
@@ -76,19 +76,13 @@ Implemented:
 - `use` module imports with namespaced function calls.
 - Bundled `std.cli`, `std.fs`, `std.io`, `std.json`, `std.log`,
   `std.path`, `std.process`, `std.str`, and `std.test` modules.
-- `async $sh"..."`, `spawn $sh"..."`, `await future`, and `future.wait()` for
-  background command execution.
-- Multi-line `$sh"..."` and `$sh'...'` commands, including Bash heredocs.
-- `$sh{ ... }` braced Bash fragments for commands with nested shell syntax.
-- `$sh"..." |> $sh"..."` and `$sh{ ... } |> $sh{ ... }` pipelines.
-- `$sh"..." >> write("path")`, `$sh"..." >> append("path")`, and optional
-  `stderr = "path"`.
-- `$sh"..."`, `$sh'...'`, `try` propagation, and postfix `!` propagation for
-  Result values and commands, including nested eager and lazy expression
-  positions, `match` guards, and Result-returning lambda bodies.
+- Policy-approved `run.<group>.<command>(...)` calls with fixed executable
+  paths and individually quoted arguments.
+- Runtime enforcement of read and write roots for filesystem operations and
+  policy-designated command arguments.
 - `require("cmd")`, `require("cmd", version = ">= 1")`, and
   `requireOneOf(["cmd1", "cmd2"])`.
-- `raw { ... }` blocks copied directly into generated Bash.
+- Rejection of `$sh`, raw Bash, pipelines, and redirects.
 - `##` comments, blank lines, and shebang lines.
 - A static checker for the implemented expression and block subset.
 - CLI output to stdout or a file.

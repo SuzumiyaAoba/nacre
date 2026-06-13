@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use crate::policy::ExecutionPolicy;
 use crate::{
     BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ImplMethod, MatchArm,
     Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
@@ -11,8 +12,22 @@ pub fn type_check(program: &Program) -> Result<(), CompileError> {
     type_check_and_lower(program).map(|_| ())
 }
 
+pub fn type_check_with_policy(
+    program: &Program,
+    policy: &ExecutionPolicy,
+) -> Result<(), CompileError> {
+    type_check_and_lower_with_policy(program, policy).map(|_| ())
+}
+
 pub(crate) fn type_check_and_lower(program: &Program) -> Result<Program, CompileError> {
-    let mut checker = TypeChecker::default();
+    type_check_and_lower_with_policy(program, &ExecutionPolicy::deny_all())
+}
+
+pub(crate) fn type_check_and_lower_with_policy(
+    program: &Program,
+    policy: &ExecutionPolicy,
+) -> Result<Program, CompileError> {
+    let mut checker = TypeChecker::with_policy(policy.clone());
     collect_declared_names(program, &mut checker.reserved_names.borrow_mut());
     let program = checker.check_and_lower_program(program)?;
     let generated = checker.generated_functions.borrow();
@@ -130,6 +145,7 @@ enum DoFamily {
 
 #[derive(Clone)]
 struct TypeChecker {
+    policy: ExecutionPolicy,
     bindings: HashMap<String, Binding>,
     types: HashMap<String, Type>,
     generic_types: HashMap<String, (Vec<String>, Type)>,
@@ -151,9 +167,16 @@ struct TypeChecker {
 
 impl Default for TypeChecker {
     fn default() -> Self {
+        Self::with_policy(ExecutionPolicy::deny_all())
+    }
+}
+
+impl TypeChecker {
+    fn with_policy(policy: ExecutionPolicy) -> Self {
         let mut types = HashMap::new();
         types.insert("CmdError".to_string(), cmd_error_type());
         Self {
+            policy,
             bindings: HashMap::new(),
             types,
             generic_types: HashMap::new(),
@@ -334,7 +357,8 @@ impl TypeChecker {
             Expr::Array(values)
             | Expr::Tuple(values)
             | Expr::Variant { args: values, .. }
-            | Expr::Call { args: values, .. } => {
+            | Expr::Call { args: values, .. }
+            | Expr::AllowedCommand { args: values, .. } => {
                 for value in values {
                     self.extract_nested_try_results(value, false, prefix);
                 }
@@ -2589,6 +2613,30 @@ impl TypeChecker {
 
     fn lower_expr(&self, expr: &Expr, line: usize) -> Result<Expr, CompileError> {
         match expr {
+            Expr::AllowedCommand {
+                group,
+                command,
+                args,
+                ..
+            } => {
+                let policy = self.policy.command(group, command).ok_or_else(|| {
+                    CompileError::new(
+                        line,
+                        format!("command `{group}.{command}` is not allowed by the execution policy"),
+                    )
+                })?;
+                Ok(Expr::AllowedCommand {
+                    group: group.clone(),
+                    command: command.clone(),
+                    args: args
+                        .iter()
+                        .map(|arg| self.lower_expr(arg, line))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    program: Some(policy.program().to_string_lossy().into_owned()),
+                    read_args: policy.read_args().to_vec(),
+                    write_args: policy.write_args().to_vec(),
+                })
+            }
             Expr::Call { name, args } => {
                 if let Some(variant) = self.variants.get(name) {
                     return Ok(Expr::Variant {
@@ -3619,8 +3667,17 @@ impl TypeChecker {
                 self.check_string_interpolations(value, line)?;
                 Ok(Type::String)
             }
+            Expr::AllowedCommand {
+                group,
+                command,
+                args,
+                ..
+            } => self.check_allowed_command(group, command, args, line),
             Expr::HasCommand(_) => Ok(Type::Bool),
-            Expr::PathExists(path) => self.check_path_exists(path, line),
+            Expr::PathExists(path) => {
+                self.require_read_access("pathExists", line)?;
+                self.check_path_exists(path, line)
+            }
             Expr::ProcessEnv { name } => self.check_process_env(name, line),
             Expr::JsonParse { value } => self.check_json_parse(value, line),
             Expr::JsonStringify { name } => self.check_json_stringify(name, line),
@@ -3984,19 +4041,29 @@ impl TypeChecker {
             Expr::CommandResult { .. } => Ok(command_result_type()),
             Expr::ProcessArgs => Ok(Type::Array(Box::new(Type::String))),
             Expr::FsIsFile { path } | Expr::FsIsDir { path } => {
+                self.require_read_access("filesystem read", line)?;
                 self.check_fs_path(path, line).map(|_| Type::Bool)
             }
-            Expr::FsSize { path } => self.check_fs_path(path, line).map(|_| Type::Int),
-            Expr::FsReadLines { path } => self
-                .check_fs_path(path, line)
-                .map(|_| Type::Array(Box::new(Type::String))),
-            Expr::FsList { path } => self
-                .check_fs_path(path, line)
-                .map(|_| Type::Array(Box::new(Type::String))),
+            Expr::FsSize { path } => {
+                self.require_read_access("fs.size", line)?;
+                self.check_fs_path(path, line).map(|_| Type::Int)
+            }
+            Expr::FsReadLines { path } => {
+                self.require_read_access("fs.readLines", line)?;
+                self.check_fs_path(path, line)
+                    .map(|_| Type::Array(Box::new(Type::String)))
+            }
+            Expr::FsList { path } => {
+                self.require_read_access("fs.list", line)?;
+                self.check_fs_path(path, line)
+                    .map(|_| Type::Array(Box::new(Type::String)))
+            }
             Expr::FsWriteLines { path, lines } => {
+                self.require_write_access("fs.writeLines", line)?;
                 self.check_fs_write_lines(path, lines, "fs.writeLines", line)
             }
             Expr::FsAppendLines { path, lines } => {
+                self.require_write_access("fs.appendLines", line)?;
                 self.check_fs_write_lines(path, lines, "fs.appendLines", line)
             }
             Expr::CliParse => Ok(Type::Map(Box::new(Type::String), Box::new(Type::String))),
@@ -4246,6 +4313,83 @@ impl TypeChecker {
                 line,
                 format!("await expects Future, found {}", other.name()),
             )),
+        }
+    }
+
+    fn check_allowed_command(
+        &self,
+        group: &str,
+        command: &str,
+        args: &[Expr],
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Some(policy) = self.policy.command(group, command) else {
+            return Err(CompileError::new(
+                line,
+                format!("command `{group}.{command}` is not allowed by the execution policy"),
+            ));
+        };
+        for index in policy.read_args() {
+            if *index >= args.len() {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "policy for command `{group}.{command}` requires read path argument {}",
+                        index + 1
+                    ),
+                ));
+            }
+            self.require_read_access(&format!("command `{group}.{command}`"), line)?;
+        }
+        for index in policy.write_args() {
+            if *index >= args.len() {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "policy for command `{group}.{command}` requires write path argument {}",
+                        index + 1
+                    ),
+                ));
+            }
+            self.require_write_access(&format!("command `{group}.{command}`"), line)?;
+        }
+        for arg in args {
+            let ty = self.check_expr(arg, line)?;
+            if !matches!(
+                ty,
+                Type::String | Type::Path | Type::Int | Type::Float | Type::Bool | Type::ExitCode
+            ) {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "command `{group}.{command}` arguments must be scalar, found {}",
+                        ty.name()
+                    ),
+                ));
+            }
+        }
+        Ok(Type::String)
+    }
+
+    fn require_read_access(&self, operation: &str, line: usize) -> Result<(), CompileError> {
+        if self.policy.has_read_access() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!("{operation} requires at least one allowed filesystem read root"),
+            ))
+        }
+    }
+
+    fn require_write_access(&self, operation: &str, line: usize) -> Result<(), CompileError> {
+        if self.policy.has_write_access() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!("{operation} requires at least one allowed filesystem write root"),
+            ))
         }
     }
 

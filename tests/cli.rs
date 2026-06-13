@@ -21,11 +21,6 @@ const home = env.HOME ?? "/tmp"
 let count = 1
 count = count + 2 * 3
 const cmp = count >= 7
-try $sh"true"
-$sh'echo cli'
-raw {
-echo raw
-}
 "#,
     )
     .unwrap();
