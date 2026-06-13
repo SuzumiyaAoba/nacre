@@ -48,8 +48,19 @@
             packages = [
               rustToolchain
               pkgs.cargo-llvm-cov
+              pkgs.mdbook
             ];
           };
+        }
+      );
+
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor system;
+        in
+        {
+          mdbook = pkgs.mdbook;
         }
       );
 

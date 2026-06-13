@@ -1,0 +1,26 @@
+[book]
+authors = ["SuzumiyaAoba"]
+language = "en"
+src = "docs"
+title = "Nacre Documentation"
+
+[build]
+build-dir = "site"
+create-missing = false
+
+[output.html]
+additional-css = ["theme/nacre.css"]
+default-theme = "light"
+git-repository-url = "https://github.com/SuzumiyaAoba/nacre"
+no-section-label = true
+preferred-dark-theme = "navy"
+site-url = "/nacre/"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true

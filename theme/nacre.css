@@ -1,0 +1,136 @@
+:root {
+  --nacre-ink: #172026;
+  --nacre-muted: #5e6a71;
+  --nacre-line: #d7dde1;
+  --nacre-paper: #fbfcfd;
+  --nacre-panel: #ffffff;
+  --nacre-teal: #0b6b6f;
+  --nacre-red: #a43b3b;
+}
+
+.light {
+  --bg: var(--nacre-paper);
+  --fg: var(--nacre-ink);
+  --sidebar-bg: #f3f6f7;
+  --sidebar-fg: #35434a;
+  --sidebar-active: var(--nacre-teal);
+  --links: var(--nacre-teal);
+  --inline-code-color: #8e3030;
+  --quote-bg: #eef5f4;
+  --quote-border: var(--nacre-teal);
+  --table-border-color: var(--nacre-line);
+  --table-header-bg: #eef2f3;
+  --table-alternate-bg: #f7f9fa;
+}
+
+body {
+  letter-spacing: 0;
+}
+
+.menu-title {
+  color: var(--nacre-ink);
+  font-weight: 750;
+}
+
+.content main {
+  max-width: 920px;
+}
+
+.content main h1,
+.content main h2,
+.content main h3 {
+  letter-spacing: 0;
+}
+
+.content main h1 {
+  margin-bottom: 0.7em;
+  font-size: 2.45em;
+}
+
+.content main h2 {
+  margin-top: 1.8em;
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid var(--nacre-line);
+}
+
+.nacre-cover {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin: 1.4rem 0 2rem;
+  border: 1px solid var(--nacre-line);
+  border-radius: 6px;
+  background: var(--nacre-panel);
+}
+
+.nacre-lede {
+  max-width: 760px;
+  color: var(--fg);
+  font-size: 1.16em;
+  line-height: 1.7;
+  opacity: 0.76;
+}
+
+.nacre-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.6rem 0 2rem;
+}
+
+.nacre-links a {
+  display: block;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--table-border-color);
+  border-radius: 6px;
+  background: var(--quote-bg);
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.nacre-links a:hover {
+  border-color: var(--nacre-teal);
+  color: var(--nacre-teal);
+  text-decoration: none;
+}
+
+pre {
+  border-radius: 6px;
+}
+
+blockquote {
+  border-radius: 0 4px 4px 0;
+}
+
+@media (max-width: 680px) {
+  html,
+  body,
+  .content {
+    overflow-x: hidden;
+  }
+
+  .content,
+  .content main {
+    min-width: 0;
+  }
+
+  .content main {
+    width: calc(100vw - 40px);
+    max-width: calc(100vw - 40px);
+    margin-inline-start: 0;
+    margin-inline-end: 0;
+  }
+
+  .menu-title {
+    display: none;
+  }
+
+  .content main h1 {
+    font-size: 2em;
+  }
+
+  .nacre-links {
+    grid-template-columns: 1fr;
+  }
+}

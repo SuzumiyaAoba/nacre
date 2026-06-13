@@ -8,7 +8,7 @@ This repository currently contains:
 - A Rust compiler library and CLI.
 - A verified bootstrap source at `bootstrap/self.ncr`.
 - Documentation for the implemented language subset.
-- A static official site under `docs/site/`.
+- An mdBook site deployed through GitHub Pages.
 - Tests and coverage gates for the compiler.
 
 ## Quick Start
@@ -21,6 +21,7 @@ bash /tmp/hello.sh
 
 ## Documentation
 
+- Published site: [suzumiyaaoba.com/nacre](https://suzumiyaaoba.com/nacre/)
 - Start here: [docs/index.md](docs/index.md)
 - Tutorial: [docs/tutorial.md](docs/tutorial.md)
 - Language reference: [docs/language-reference.md](docs/language-reference.md)
@@ -28,7 +29,6 @@ bash /tmp/hello.sh
 - Self-compilation: [docs/self-compilation.md](docs/self-compilation.md)
 - Testing and coverage: [docs/testing-and-coverage.md](docs/testing-and-coverage.md)
 - Current limitations: [docs/limitations.md](docs/limitations.md)
-- Static official site: [docs/site/index.html](docs/site/index.html)
 
 The long-form syntax design draft is kept at [docs/syntax.md](docs/syntax.md).
 It describes planned language features beyond the current implementation.
@@ -38,6 +38,7 @@ It describes planned language features beyond the current implementation.
 ```bash
 nix develop path:. -c cargo test
 nix develop path:. -c scripts/verify-docs.sh
+nix run .#mdbook -- build
 nix develop path:. -c scripts/coverage.sh
 ```
 

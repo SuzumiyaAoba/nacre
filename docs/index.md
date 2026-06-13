@@ -1,7 +1,12 @@
 # Nacre Documentation
 
+<img class="nacre-cover" src="assets/nacre-compiler.png" alt="Structured Nacre source flowing through pearlescent compiler layers into a shell script" />
+
+<p class="nacre-lede">
 Nacre is a Rust-implemented compiler that translates a compact `.ncr` source
-file into a standalone Bash script.
+file into a standalone Bash script. It combines typed, structured expressions
+with direct access to the commands and pipelines used in everyday automation.
+</p>
 
 The current implementation is intentionally small and verifiable. It supports
 immutable and mutable variables, primitive and structured expressions,
@@ -11,13 +16,12 @@ Bash compiler.
 
 ## What to Read
 
-1. [Tutorial](tutorial.md): build and run your first Nacre script.
-2. [Language Reference](language-reference.md): every implemented syntax form.
-3. [CLI Reference](cli.md): compiler command usage and error behavior.
-4. [Self-Compilation](self-compilation.md): how the bootstrap proof works.
-5. [Testing and Coverage](testing-and-coverage.md): test and coverage gates.
-6. [Current Limitations](limitations.md): important constraints in this prototype.
-7. [Examples](examples/): small `.ncr` files used by the documentation verifier.
+<div class="nacre-links">
+  <a href="tutorial.html">Start the tutorial</a>
+  <a href="language-reference.html">Browse the language reference</a>
+  <a href="examples.html">Read verified examples</a>
+  <a href="cli.html">Use the compiler CLI</a>
+</div>
 
 ## Current Scope
 
@@ -26,8 +30,8 @@ Implemented:
 - `const`, `let`, and reassignment.
 - `Int`, `Float`, `Bool`, `String`, `Path`, `ExitCode`, and `Unit`.
 - Options, results, arrays, maps, records, tuples, type aliases, generic type
-  aliases, function types, scalar-payload sum types, newtypes, type annotations, identifiers,
-  `env.NAME`, and `env.NAME ?? "default"`.
+  aliases, function types, structured-payload sum types, newtypes, type
+  annotations, identifiers, `env.NAME`, and `env.NAME ?? "default"`.
 - Option `.map(mapper)`, `.ap(value)`, and `.flatMap(mapper)` for
   one-parameter functions and lambdas, plus lazy
   `.orElse(fallback)` / `<|>` selection.
@@ -62,8 +66,8 @@ Implemented:
   checks for `Bool`, Option, Result, and sum types.
 - `fn`, typed parameters, default parameters, rest parameters, generic
   functions, `return`, and function calls.
-- Expression lambdas with contextual function types and by-value scalar
-  captures.
+- Expression lambdas with contextual function types and by-value primitive or
+  structured captures.
 - UFCS-style method calls for functions, where `value.method(arg)` compiles as
   `method(value, arg)`.
 - `trait` method declarations, `impl` method definitions, and generic function
@@ -89,4 +93,5 @@ Implemented:
 - CLI output to stdout or a file.
 - Self-compilation check for `bootstrap/self.ncr`.
 
-The broader design is documented separately in [syntax.md](syntax.md).
+The broader design is documented separately in the
+[language design draft](syntax.md).

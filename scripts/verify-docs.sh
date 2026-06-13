@@ -11,5 +11,8 @@ for source in docs/examples/*.ncr; do
   bash "$output" >/dev/null
 done
 
-test -f docs/site/index.html
-test -f docs/site/styles.css
+mdbook build
+
+test -f site/index.html
+test -f site/assets/nacre-compiler.png
+test -n "$(find site/theme -maxdepth 1 -name 'nacre-*.css' -print -quit)"

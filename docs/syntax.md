@@ -16,7 +16,7 @@
 
 ### プリミティブ型
 
-```
+```text
 String       ## 文字列（シェル上はすべて文字列だが、型として区別する）
 Int          ## 整数
 Float        ## 浮動小数点数
@@ -92,13 +92,13 @@ requireOneOf(["curl", "wget"])
 
 ### 組み込み型
 
-```
+```text
 CmdError     ## コマンドエラー（code: ExitCode, stderr: String）
 ```
 
 ### コンポジット型
 
-```
+```text
 [T]             ## 配列
 Map[K, V]       ## 連想配列（Dictionary）
 T?              ## Option（Some(T) | None）

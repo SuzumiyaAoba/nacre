@@ -26,6 +26,17 @@ scripts/verify-docs.sh
 
 This compiles and executes every `.ncr` file in `docs/examples/`.
 
+## Documentation Site
+
+Build the GitHub Pages site locally:
+
+```bash
+nix run .#mdbook -- build
+```
+
+The generated site is written to `site/`. GitHub Actions runs the same command
+and deploys the artifact whenever the repository's default branch is updated.
+
 ## Coverage Gate
 
 Run:
