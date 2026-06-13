@@ -1,0 +1,5 @@
+const label = "raw"
+raw {
+echo "inside raw block"
+}
+try $sh"echo done: ${label}"

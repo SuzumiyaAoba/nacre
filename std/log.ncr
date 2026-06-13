@@ -1,0 +1,15 @@
+fn info(message: String): Unit {
+try $sh"printf '%s\n' \"INFO ${message}\""
+}
+
+fn warn(message: String): Unit {
+try $sh"printf '%s\n' \"WARN ${message}\" >&2"
+}
+
+fn error(message: String): Unit {
+try $sh"printf '%s\n' \"ERROR ${message}\" >&2"
+}
+
+fn debug(message: String): Unit {
+try $sh"if [ \"${NACRE_DEBUG:-}\" = 1 ]; then printf '%s\n' \"DEBUG ${message}\" >&2; fi"
+}

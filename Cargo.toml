@@ -1,0 +1,11 @@
+[package]
+name = "nacre"
+version = "0.1.0"
+edition = "2021"
+description = "A tiny Rust implementation of the Nacre-to-Bash compiler."
+license = "MIT"
+
+[dependencies]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)'] }

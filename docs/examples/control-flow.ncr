@@ -1,0 +1,20 @@
+const names: [String] = ["alice", "bob"]
+for name in names {
+try $sh"echo name: ${name}"
+}
+
+let count = 2
+const label = if count > 0 { "positive" } else { "zero" }
+try $sh"echo label: ${label}"
+const matched = match label { "positive" => "matched", _ => "fallback" }
+try $sh"echo match: ${matched}"
+while count > 0 {
+try $sh"echo count: ${count}"
+count = count - 1
+}
+
+const pi = 3.14
+const doubled = pi * 2
+if doubled > 6 {
+try $sh"echo doubled: ${doubled}"
+}

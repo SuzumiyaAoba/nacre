@@ -1,0 +1,85 @@
+fn exists(path: String): Bool {
+return pathExists(path)
+}
+
+fn isFile(path: String): Bool {
+return fs.isFile(path)
+}
+
+fn isDir(path: String): Bool {
+return fs.isDir(path)
+}
+
+fn size(path: String): Int {
+return fs.size(path)
+}
+
+fn mkdirP(path: String): Unit {
+try $sh"mkdir -p \"${path}\""
+}
+
+fn remove(path: String): Unit {
+try $sh"rm -rf \"${path}\""
+}
+
+fn copy(source: String, target: String): Unit {
+try $sh"cp -R \"${source}\" \"${target}\""
+}
+
+fn move(source: String, target: String): Unit {
+try $sh"mv \"${source}\" \"${target}\""
+}
+
+fn touch(path: String): Unit {
+try $sh"touch \"${path}\""
+}
+
+fn createTempDir(): String {
+return try $sh"mktemp -d"
+}
+
+fn readText(path: String): String {
+return try $sh"cat \"${path}\""
+}
+
+fn readLines(path: String): [String] {
+return fs.readLines(path)
+}
+
+fn list(path: String): [String] {
+return fs.list(path)
+}
+
+fn basename(path: String): String {
+return try $sh"basename \"${path}\""
+}
+
+fn dirname(path: String): String {
+return try $sh"dirname \"${path}\""
+}
+
+fn stem(path: String): String {
+return try $sh"__nacre_path_base=$(basename \"${path}\"); case \"$__nacre_path_base\" in .*.*) printf '%s' \"${__nacre_path_base%.*}\" ;; .*) printf '%s' \"$__nacre_path_base\" ;; *.*) printf '%s' \"${__nacre_path_base%.*}\" ;; *) printf '%s' \"$__nacre_path_base\" ;; esac"
+}
+
+fn extname(path: String): String {
+return try $sh"__nacre_path_base=$(basename \"${path}\"); case \"$__nacre_path_base\" in .*.*) printf '%s' \".${__nacre_path_base##*.}\" ;; .*) printf '' ;; *.*) printf '%s' \".${__nacre_path_base##*.}\" ;; *) printf '' ;; esac"
+}
+
+fn writeText(path: String, content: String): Unit {
+try $sh"printf '%s' \"${content}\" > \"${path}\""
+}
+
+fn appendText(path: String, content: String): Unit {
+try $sh"printf '%s' \"${content}\" >> \"${path}\""
+}
+
+fn writeLines(path: String, lines: [String]): Unit {
+fs.writeLines(path, lines)
+}
+
+fn appendLines(path: String, lines: [String]): Unit {
+for line in lines {
+try $sh"printf '%s\n' \"${line}\" >> \"${path}\""
+}
+}

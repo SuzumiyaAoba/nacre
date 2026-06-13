@@ -1,0 +1,9 @@
+fn greet(name: String, prefix: String = "Hello"): String {
+return "${prefix}, ${name}"
+}
+
+const defaultGreeting = greet("Nacre")
+const customGreeting = greet("Nacre", "Hi")
+
+try $sh"echo ${defaultGreeting}"
+try $sh"echo ${customGreeting}"

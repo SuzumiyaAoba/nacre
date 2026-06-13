@@ -1,0 +1,63 @@
+fn split(value: String, separator: String): [String] {
+return value.split(separator)
+}
+
+fn join(values: [String], separator: String): String {
+return values.join(separator)
+}
+
+fn len(value: String): Int {
+return value.len()
+}
+
+fn isEmpty(value: String): Bool {
+return value.isEmpty()
+}
+
+fn slice(value: String, start: Int, end: Int): String {
+return value.slice(start, end)
+}
+
+fn trim(value: String): String {
+return value.trim()
+}
+
+fn trimStart(value: String): String {
+return value.trimStart()
+}
+
+fn trimEnd(value: String): String {
+return value.trimEnd()
+}
+
+fn contains(value: String, needle: String): Bool {
+return value.contains(needle)
+}
+
+fn indexOf(value: String, needle: String): Int {
+return value.indexOf(needle)
+}
+
+fn startsWith(value: String, prefix: String): Bool {
+return value.startsWith(prefix)
+}
+
+fn endsWith(value: String, suffix: String): Bool {
+return value.endsWith(suffix)
+}
+
+fn toUpper(value: String): String {
+return value.toUpper()
+}
+
+fn toLower(value: String): String {
+return value.toLower()
+}
+
+fn repeat(value: String, count: Int): String {
+return value.repeat(count)
+}
+
+fn replace(value: String, search: String, replacement: String): String {
+return value.replace(search, replacement)
+}

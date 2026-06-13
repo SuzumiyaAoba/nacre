@@ -1,0 +1,46 @@
+# Nacre
+
+Nacre is a small, self-hosting language experiment that compiles a typed,
+script-oriented syntax into Bash.
+
+This repository currently contains:
+
+- A Rust compiler library and CLI.
+- A verified bootstrap source at `bootstrap/self.ncr`.
+- Documentation for the implemented language subset.
+- A static official site under `docs/site/`.
+- Tests and coverage gates for the compiler.
+
+## Quick Start
+
+```bash
+cargo run -- docs/examples/hello.ncr
+cargo run -- docs/examples/hello.ncr /tmp/hello.sh
+bash /tmp/hello.sh
+```
+
+## Documentation
+
+- Start here: [docs/index.md](docs/index.md)
+- Tutorial: [docs/tutorial.md](docs/tutorial.md)
+- Language reference: [docs/language-reference.md](docs/language-reference.md)
+- CLI reference: [docs/cli.md](docs/cli.md)
+- Self-compilation: [docs/self-compilation.md](docs/self-compilation.md)
+- Testing and coverage: [docs/testing-and-coverage.md](docs/testing-and-coverage.md)
+- Current limitations: [docs/limitations.md](docs/limitations.md)
+- Static official site: [docs/site/index.html](docs/site/index.html)
+
+The long-form syntax design draft is kept at [docs/syntax.md](docs/syntax.md).
+It describes planned language features beyond the current implementation.
+
+## Verification
+
+```bash
+nix develop path:. -c cargo test
+nix develop path:. -c scripts/verify-docs.sh
+nix develop path:. -c scripts/coverage.sh
+```
+
+`scripts/coverage.sh` enforces 100% line and function coverage for the current
+compiler implementation. `nix develop path:.` provides the pinned nightly Rust
+toolchain, `llvm-tools-preview`, and `cargo-llvm-cov`.

@@ -1,0 +1,4 @@
+const captured = $sh"printf pipeline" |> $sh"cat"
+try $sh"echo ${captured}"
+
+$sh"printf direct" |> $sh"cat"
