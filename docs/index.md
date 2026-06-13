@@ -12,7 +12,8 @@ The current implementation is intentionally small and verifiable. It supports
 immutable and mutable variables, primitive and structured expressions,
 statement-level control flow, command execution, raw Bash blocks, a CLI
 compiler, and a bootstrap source that can compile itself through the generated
-Bash compiler.
+Bash compiler. Source syntax is parsed from a declarative PEG grammar using
+`rust-peg`.
 
 ## What to Read
 

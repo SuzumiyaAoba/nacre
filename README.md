@@ -6,6 +6,7 @@ script-oriented syntax into Bash.
 This repository currently contains:
 
 - A Rust compiler library and CLI.
+- A grammar-driven parser built with `rust-peg`.
 - A verified bootstrap source at `bootstrap/self.ncr`.
 - Documentation for the implemented language subset.
 - An mdBook site deployed through GitHub Pages.

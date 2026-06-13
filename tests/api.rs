@@ -5252,8 +5252,14 @@ fn public_api_covers_supported_error_paths() {
     ];
 
     for (source, message) in cases {
-        let error = nacre::compile_source(source).unwrap_err();
-        assert!(error.message().contains(message), "{error}");
+        let error = match nacre::compile_source(source) {
+            Err(error) => error,
+            Ok(_) => panic!("expected compilation to fail for:\n{source}"),
+        };
+        assert!(
+            error.message().contains(message),
+            "source:\n{source}\nerror: {error}"
+        );
     }
 }
 

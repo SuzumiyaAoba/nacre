@@ -6,6 +6,7 @@ mod emitter;
 mod error;
 mod lowering;
 mod parser;
+mod parser_peg;
 
 use std::collections::HashSet;
 use std::fs;

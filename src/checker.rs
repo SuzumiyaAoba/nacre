@@ -8540,7 +8540,10 @@ const _ = "discarded"
 
         for (source, line, message) in cases {
             let program = parse(source).unwrap();
-            let error = type_check(&program).unwrap_err();
+            let error = match type_check(&program) {
+                Err(error) => error,
+                Ok(()) => panic!("expected type error for `{source}`"),
+            };
             assert_eq!(error.line(), line);
             assert!(error.message().contains(message), "{error}");
         }
