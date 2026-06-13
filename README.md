@@ -33,6 +33,10 @@ bash /tmp/hello.sh
 The long-form syntax design draft is kept at [docs/syntax.md](docs/syntax.md).
 It describes planned language features beyond the current implementation.
 
+## Development Attribution
+
+All code in this repository was developed by a Coding Agent.
+
 ## Verification
 
 ```bash

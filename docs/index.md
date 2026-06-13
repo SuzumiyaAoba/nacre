@@ -95,3 +95,8 @@ Implemented:
 
 The broader design is documented separately in the
 [language design draft](syntax.md).
+
+## Development Attribution
+
+All code in this repository was developed by a Coding Agent. See
+[Development Attribution](development-attribution.md) for details.
