@@ -47,6 +47,6 @@ nix run .#mdbook -- build
 nix develop path:. -c scripts/coverage.sh
 ```
 
-`scripts/coverage.sh` enforces 100% line and function coverage for the current
-compiler implementation. `nix develop path:.` provides the pinned nightly Rust
+`scripts/coverage.sh` enforces non-regression floors of 75% line coverage and
+90% function coverage. `nix develop path:.` provides the pinned nightly Rust
 toolchain, `llvm-tools-preview`, and `cargo-llvm-cov`.

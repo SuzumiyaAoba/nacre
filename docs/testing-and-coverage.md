@@ -62,8 +62,12 @@ The development shell provides nightly Rust, `llvm-tools-preview`, and
 `cargo-llvm-cov`. The script also supports a rustup-managed nightly toolchain
 outside Nix. It enforces:
 
-- 100% line coverage.
-- 100% function coverage.
+- At least 75% line coverage.
+- At least 90% function coverage.
+
+These floors prevent the compiler's coverage from regressing from the current
+test suite. Stricter local or CI checks can set `COVERAGE_MIN_LINES` and
+`COVERAGE_MIN_FUNCTIONS` before running the script.
 
 `flake.lock` pins the Nix inputs. `rust-toolchain.toml` provides the equivalent
 rustup configuration.

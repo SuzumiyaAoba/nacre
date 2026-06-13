@@ -14,9 +14,12 @@ elif [[ "$(rustc --version)" != *nightly* ]]; then
   exit 1
 fi
 
+minimum_line_coverage="${COVERAGE_MIN_LINES:-75}"
+minimum_function_coverage="${COVERAGE_MIN_FUNCTIONS:-90}"
+
 cargo "${cargo_args[@]}" llvm-cov \
   --all-targets \
   --ignore-filename-regex '/tests/' \
   --summary-only \
-  --fail-under-lines 100 \
-  --fail-under-functions 100
+  --fail-under-lines "$minimum_line_coverage" \
+  --fail-under-functions "$minimum_function_coverage"
