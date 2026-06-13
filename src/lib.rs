@@ -18,7 +18,6 @@ pub use ast::{
     Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 pub use checker::{type_check, type_check_with_policy};
-pub use emitter::{transpile, transpile_with_policy};
 pub use error::CompileError;
 pub use parser::parse;
 pub use policy::ExecutionPolicy;
@@ -33,7 +32,7 @@ pub fn compile_source_with_policy(
 ) -> Result<String, CompileError> {
     let program = parse(source)?;
     let program = checker::type_check_and_lower_with_policy(&program, policy)?;
-    Ok(transpile_with_policy(&program, policy))
+    Ok(emitter::transpile_with_policy(&program, policy))
 }
 
 pub fn compile_file(path: &Path) -> Result<String, CompileError> {
@@ -47,7 +46,7 @@ pub fn compile_file_with_policy(
     let mut seen = HashSet::new();
     let program = parse_file_expanded(path, &mut seen)?;
     let program = checker::type_check_and_lower_with_policy(&program, policy)?;
-    Ok(transpile_with_policy(&program, policy))
+    Ok(emitter::transpile_with_policy(&program, policy))
 }
 
 fn parse_file_expanded(
@@ -3157,7 +3156,6 @@ mod tests {
     use std::env;
     use std::ffi::OsString;
     use std::fs;
-    use std::process::Command;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -3211,15 +3209,10 @@ const message = utils.label("ok")
         fs::write(
             &path,
             r#"
-use std.fs
-use std.log
 use std.path
 use std.str
-const exists = fs.exists("/tmp")
-const tmp = fs.createTempDir()
 const name = path.basename("/tmp/nacre.txt")
 const clean = str.trim(" nacre ")
-log.info("checked")
 "#,
         )
         .unwrap();
@@ -3227,16 +3220,10 @@ log.info("checked")
         let bash = compile_file(&path).unwrap();
         fs::remove_file(&path).unwrap();
 
-        assert!(bash.contains("fs.exists() {"));
-        assert!(bash.contains("fs.createTempDir() {"));
-        assert!(bash.contains("log.info() {"));
         assert!(bash.contains("path.basename() {"));
         assert!(bash.contains("str.trim() {"));
-        assert!(bash.contains("readonly exists=\"$(fs.exists '/tmp')\""));
-        assert!(bash.contains("readonly tmp=\"$(fs.createTempDir)\""));
         assert!(bash.contains("readonly name=\"$(path.basename '/tmp/nacre.txt')\""));
         assert!(bash.contains("readonly clean=\"$(str.trim ' nacre ')\""));
-        assert!(bash.contains("log.info 'checked'"));
     }
 
     #[test]
@@ -3471,28 +3458,6 @@ log.info("checked")
         assert_eq!(qualify_binding("other", "mod", &binding_names), "other");
         assert_eq!(qualify_binding("_", "mod", &binding_names), "_");
         assert_eq!(with_local(&local_names, "_"), local_names);
-    }
-
-    #[test]
-    fn self_compiles_bootstrap_source() {
-        let source = compile_file(Path::new("bootstrap/self.ncr")).unwrap();
-        let compiler_path = temp_path("nacre-self.sh");
-        let output_path = temp_path("nacre-self-out.sh");
-        fs::write(&compiler_path, &source).unwrap();
-
-        let status = Command::new("bash")
-            .arg(&compiler_path)
-            .arg("bootstrap/self.ncr")
-            .arg(&output_path)
-            .status()
-            .unwrap();
-        assert!(status.success());
-
-        let bootstrapped = fs::read_to_string(&output_path).unwrap();
-        fs::remove_file(&compiler_path).unwrap();
-        fs::remove_file(&output_path).unwrap();
-
-        assert_eq!(bootstrapped, source);
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {

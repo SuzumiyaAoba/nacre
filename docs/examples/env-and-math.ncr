@@ -1,4 +1,4 @@
 const shell = env.SHELL ?? "/bin/sh"
 let count = 1
 count = count + 2 * 3
-try $sh"echo ${shell}: ${count}"
+run.output.echo("${shell}: ${count}")

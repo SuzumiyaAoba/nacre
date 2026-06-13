@@ -1,5 +1,7 @@
 # Testing and Coverage
 
+All code in this repository was developed by a Coding Agent.
+
 ## Test Suite
 
 Run:
@@ -11,10 +13,9 @@ cargo test
 The suite covers:
 
 - Parser success and error cases.
-- Bash emission for variables, expressions, commands, and raw blocks.
+- Bash emission for values, control flow, approved commands, and guarded paths.
 - CLI stdout, file output, usage errors, read errors, and write errors.
 - Public API accessors.
-- Self-compilation of `bootstrap/self.ncr`.
 
 ## Documentation Examples
 

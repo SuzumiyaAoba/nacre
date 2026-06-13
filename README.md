@@ -7,7 +7,6 @@ This repository currently contains:
 
 - A Rust compiler library and CLI.
 - A grammar-driven parser built with `rust-peg`.
-- A verified bootstrap source at `bootstrap/self.ncr`.
 - Documentation for the implemented language subset.
 - An mdBook site deployed through GitHub Pages.
 - Tests and coverage gates for the compiler.
@@ -15,8 +14,8 @@ This repository currently contains:
 ## Quick Start
 
 ```bash
-cargo run -- examples/pure.ncr /tmp/pure.sh
-bash /tmp/pure.sh
+cargo run -- --policy docs/examples/policy.toml docs/examples/hello.ncr /tmp/hello.sh
+bash /tmp/hello.sh
 ```
 
 Commands and filesystem operations require an externally reviewed TOML policy:
@@ -33,7 +32,6 @@ cargo run -- --policy nacre-policy.toml input.ncr output.sh
 - Language reference: [docs/language-reference.md](docs/language-reference.md)
 - CLI reference: [docs/cli.md](docs/cli.md)
 - Execution policy: [docs/security-policy.md](docs/security-policy.md)
-- Self-compilation: [docs/self-compilation.md](docs/self-compilation.md)
 - Testing and coverage: [docs/testing-and-coverage.md](docs/testing-and-coverage.md)
 - Current limitations: [docs/limitations.md](docs/limitations.md)
 

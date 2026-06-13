@@ -90,20 +90,17 @@ impl ExecutionPolicy {
             let mut commands = BTreeMap::new();
             for (command_name, command) in group.commands {
                 validate_identifier(&command_name, "command alias")?;
-                if !command.program.is_absolute() {
-                    return Err(CompileError::new(
-                        0,
-                        format!(
-                            "command `{group_name}.{command_name}` program must be an absolute path"
-                        ),
-                    ));
-                }
-                let program = fs::canonicalize(&command.program).map_err(|error| {
+                let configured_program = if command.program.is_absolute() {
+                    command.program
+                } else {
+                    base.join(command.program)
+                };
+                let program = fs::canonicalize(&configured_program).map_err(|error| {
                     CompileError::new(
                         0,
                         format!(
                             "failed to resolve command `{group_name}.{command_name}` program {}: {error}",
-                            command.program.display()
+                            configured_program.display()
                         ),
                     )
                 })?;
@@ -112,6 +109,15 @@ impl ExecutionPolicy {
                         0,
                         format!(
                             "command `{group_name}.{command_name}` program is not a file: {}",
+                            program.display()
+                        ),
+                    ));
+                }
+                if !is_executable(&program)? {
+                    return Err(CompileError::new(
+                        0,
+                        format!(
+                            "command `{group_name}.{command_name}` program is not executable: {}",
                             program.display()
                         ),
                     ));
@@ -232,6 +238,28 @@ fn validate_identifier(value: &str, kind: &str) -> Result<(), CompileError> {
         ));
     }
     Ok(())
+}
+
+fn is_executable(path: &Path) -> Result<bool, CompileError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = fs::metadata(path).map_err(|error| {
+            CompileError::new(
+                0,
+                format!(
+                    "failed to inspect command program {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+        Ok(metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

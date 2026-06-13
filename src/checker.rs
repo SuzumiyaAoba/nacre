@@ -895,46 +895,22 @@ impl TypeChecker {
                 self.check_expr(expr, line)?;
                 Ok(Statement::Expr(self.lower_expr(expr, line)?))
             }
-            Statement::TryCommand(command) => {
-                if self.try_command_propagates_cmd_error(line)? {
-                    Ok(Statement::TryCommandResult(command.clone()))
-                } else {
-                    Ok(statement.clone())
-                }
-            }
+            Statement::TryCommand(_)
+            | Statement::TryCommandResult(_)
+            | Statement::TryPipeline { .. }
+            | Statement::TryPipelineResult { .. }
+            | Statement::Command(_)
+            | Statement::Redirect { .. }
+            | Statement::Require { .. }
+            | Statement::RequireOneOf { .. }
+            | Statement::Raw(_) => Err(unsafe_execution_error(line)),
             Statement::TryResult(expr) => {
                 self.check_try_result(expr, line)?;
                 Ok(Statement::TryResult(
                     self.lower_try_result_value(expr, line)?,
                 ))
             }
-            Statement::TryPipeline { input, commands } => {
-                self.check_pipeline(input.as_deref(), line)?;
-                let input = input
-                    .as_ref()
-                    .map(|input| self.lower_expr(input, line).map(Box::new))
-                    .transpose()?;
-                if self.try_command_propagates_cmd_error(line)? {
-                    Ok(Statement::TryPipelineResult {
-                        input,
-                        commands: commands.clone(),
-                    })
-                } else {
-                    Ok(Statement::TryPipeline {
-                        input,
-                        commands: commands.clone(),
-                    })
-                }
-            }
-            Statement::TryCommandResult(_)
-            | Statement::TryPipelineResult { .. }
-            | Statement::Command(_)
-            | Statement::Redirect { .. }
-            | Statement::Require { .. }
-            | Statement::RequireOneOf { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Raw(_) => Ok(statement.clone()),
+            Statement::Break | Statement::Continue => Ok(statement.clone()),
             Statement::Return(expr) => {
                 self.check_return(expr, line)?;
                 let expected = self.expected_return.clone().ok_or_else(|| {
@@ -1124,18 +1100,17 @@ impl TypeChecker {
                 }
                 _ => self.check_expr(expr, line).map(|_| ()),
             },
+            Statement::TryResult(_) => Ok(()),
             Statement::TryCommand(_)
             | Statement::TryCommandResult(_)
-            | Statement::TryResult(_)
             | Statement::TryPipeline { .. }
             | Statement::TryPipelineResult { .. }
             | Statement::Command(_)
             | Statement::Redirect { .. }
             | Statement::Require { .. }
             | Statement::RequireOneOf { .. }
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Raw(_) => Ok(()),
+            | Statement::Raw(_) => Err(unsafe_execution_error(line)),
+            Statement::Break | Statement::Continue => Ok(()),
             Statement::Return(expr) => self.check_return(expr, line),
             Statement::Block { body } => {
                 let mut body_checker = self.clone();
@@ -1467,13 +1442,7 @@ impl TypeChecker {
                 "return is only valid inside a function".to_string(),
             ));
         };
-        let actual = if matches!(
-            expr,
-            Expr::Command { .. } | Expr::Pipeline { .. } | Expr::TryPipeline { .. }
-        ) && result_types(expected).is_some()
-        {
-            command_result_type()
-        } else if let Expr::TryResult(value) = expr {
+        let actual = if let Expr::TryResult(value) = expr {
             self.check_try_result_expr(value, line)?
         } else {
             self.check_expr_expected(expr, expected, line)?
@@ -1493,17 +1462,6 @@ impl TypeChecker {
                 ),
             ))
         }
-    }
-
-    fn try_command_propagates_cmd_error(&self, line: usize) -> Result<bool, CompileError> {
-        let Some(expected) = &self.expected_return else {
-            return Ok(false);
-        };
-        let resolved = self.resolve_type(expected, line)?;
-        let Some((_, err_ty)) = result_types(&resolved) else {
-            return Ok(false);
-        };
-        Ok(self.is_assignable(err_ty, &cmd_error_type(), &Expr::Unit))
     }
 
     fn check_try_result(&self, expr: &Expr, line: usize) -> Result<(), CompileError> {
@@ -1528,14 +1486,7 @@ impl TypeChecker {
                 "try result is only valid inside a Result-returning function".to_string(),
             ));
         };
-        let actual = if matches!(
-            expr,
-            Expr::Command { .. } | Expr::Pipeline { .. } | Expr::TryPipeline { .. }
-        ) {
-            command_result_type()
-        } else {
-            self.check_expr(expr, line)?
-        };
+        let actual = self.check_expr(expr, line)?;
         let Some((_, actual_err)) = result_types(&actual) else {
             return Err(CompileError::new(
                 line,
@@ -1555,22 +1506,6 @@ impl TypeChecker {
                 ),
             ))
         }
-    }
-
-    fn check_pipeline(&self, input: Option<&Expr>, line: usize) -> Result<(), CompileError> {
-        if let Some(input) = input {
-            let input_ty = self.check_expr(input, line)?;
-            if !self.is_string_like(&input_ty) {
-                return Err(CompileError::new(
-                    line,
-                    format!(
-                        "pipeline input must be String or Path, found {}",
-                        input_ty.name()
-                    ),
-                ));
-            }
-        }
-        Ok(())
     }
 
     fn program_has_return_or_implicit(
@@ -4035,10 +3970,13 @@ impl TypeChecker {
             Expr::PathIsAbsoluteValue(value) => self
                 .check_path_transform_value(value, "isAbsolute", line)
                 .map(|_| Type::Bool),
-            Expr::RawString(_) | Expr::Command { .. } | Expr::Env(_) | Expr::EnvDefault { .. } => {
-                Ok(Type::String)
-            }
-            Expr::CommandResult { .. } => Ok(command_result_type()),
+            Expr::RawString(_) | Expr::Env(_) | Expr::EnvDefault { .. } => Ok(Type::String),
+            Expr::Command { .. }
+            | Expr::CommandResult { .. }
+            | Expr::AsyncCommand(_)
+            | Expr::Pipeline { .. }
+            | Expr::TryPipeline { .. }
+            | Expr::PipelineResult { .. } => Err(unsafe_execution_error(line)),
             Expr::ProcessArgs => Ok(Type::Array(Box::new(Type::String))),
             Expr::FsIsFile { path } | Expr::FsIsDir { path } => {
                 self.require_read_access("filesystem read", line)?;
@@ -4067,16 +4005,7 @@ impl TypeChecker {
                 self.check_fs_write_lines(path, lines, "fs.appendLines", line)
             }
             Expr::CliParse => Ok(Type::Map(Box::new(Type::String), Box::new(Type::String))),
-            Expr::AsyncCommand(_) => Ok(Type::Future(Box::new(Type::String))),
             Expr::Await(name) => self.check_await(name, line),
-            Expr::Pipeline { input, .. } | Expr::TryPipeline { input, .. } => {
-                self.check_pipeline(input.as_deref(), line)?;
-                Ok(Type::String)
-            }
-            Expr::PipelineResult { input, .. } => {
-                self.check_pipeline(input.as_deref(), line)?;
-                Ok(command_result_type())
-            }
             Expr::IfElse {
                 condition,
                 then_expr,
@@ -8331,6 +8260,14 @@ fn constructor_pattern_name(pattern: &Expr) -> &'static str {
     }
 }
 
+fn unsafe_execution_error(line: usize) -> CompileError {
+    CompileError::new(
+        line,
+        "unsafe shell execution is disabled; use a policy-approved `run.<group>.<command>(...)` call"
+            .to_string(),
+    )
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -8353,10 +8290,7 @@ const unit: Unit = ()
 const copied = answer
 const greeting = "Hello, ${text}"
 const rawGreeting = r"Hello, ${missing}"
-const host = $sh"hostname"
-const requiredHost = try $sh"hostname"
 const hasGit = hasCommand("git")
-const hasTmp = pathExists("/tmp")
 const names: [String] = ["alice", "bob"]
 const [firstUser, ...remainingUsers] = names
 const nums = [1, 2, 3]
@@ -8408,8 +8342,6 @@ const boundedInt = boundIdentity(7)
 type Box[T] = { item: T }
 const boxed: Box[Int] = { item: 7 }
 const boxedValue = boxed.item
-const future = async $sh"printf async"
-const asyncOut = await future
 newtype UserId = Int
 newtype GroupId = Int
 const uid: UserId = UserId(42)
@@ -8418,10 +8350,10 @@ const rawUid: Int = uid.value
 if answer > 0 {
 const inside = "ok"
 } else {
-$sh'echo zero'
+const inside = "zero"
 }
 while answer > 0 {
-$sh'echo loop'
+break
 }
 for item in names {
 const echoed = item
@@ -8597,7 +8529,7 @@ const _ = "discarded"
             ("const x = 1\nconst y = await x", 2, "await expects Future"),
             ("const x = 1\nconst y = x()", 2, "not callable"),
             ("const x = missingFn()", 1, "undefined function"),
-            ("fn greet(name: String): String {\n$sh'echo no return'\n}", 1, "must return String"),
+            ("fn greet(name: String): String {\nconst value = name\n}", 1, "must return String"),
             ("return 1", 1, "return is only valid inside a function"),
             ("fn greet(prefix: String = \"Hello\", name: String): String {\nreturn name\n}", 1, "required function parameters"),
             ("fn greet(name: String = 1): String {\nreturn name\n}", 1, "default for parameter"),
@@ -8668,10 +8600,10 @@ const _ = "discarded"
             ),
             ("const x = Missing(1)", 1, "unknown type"),
             ("const x = 1\nconst y = x.value", 2, "cannot access `.value`"),
-            ("if 1 {\n$sh'no'\n}", 1, "condition must be Bool"),
-            ("while 1 {\n$sh'no'\n}", 1, "condition must be Bool"),
+            ("if 1 {\nconst value = 1\n}", 1, "condition must be Bool"),
+            ("while 1 {\nbreak\n}", 1, "condition must be Bool"),
             (
-                "const x = 1\nfor item in x {\n$sh'no'\n}",
+                "const x = 1\nfor item in x {\nconst value = item\n}",
                 2,
                 "for loop iterable must be Array",
             ),
@@ -8679,7 +8611,6 @@ const _ = "discarded"
             ("const x = 1 == true", 1, "matching operand types"),
             ("const x = true % 2", 1, "requires Int operands"),
             ("const x = \"a\" < \"b\"", 1, "requires numeric operands"),
-            ("const x = pathExists(1)", 1, "pathExists expects"),
         ];
 
         for (source, line, message) in cases {
@@ -8717,13 +8648,6 @@ const id = UserId(1)
 let count = 1
 count = 2
 greet("Ada")
-try $sh"true"
-$sh"true"
-require("sh")
-requireOneOf(["sh", "bash"])
-raw {
-:
-}
 if true {
 const inside = count
 } else {

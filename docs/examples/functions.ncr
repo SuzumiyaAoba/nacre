@@ -5,5 +5,5 @@ return "${prefix}, ${name}"
 const defaultGreeting = greet("Nacre")
 const customGreeting = greet("Nacre", "Hi")
 
-try $sh"echo ${defaultGreeting}"
-try $sh"echo ${customGreeting}"
+run.output.echo(defaultGreeting)
+run.output.echo(customGreeting)

@@ -1,5 +1,7 @@
 # CLI Reference
 
+All code in this repository was developed by a Coding Agent.
+
 The `nacre` binary compiles `.ncr` source to Bash.
 
 ## Usage
@@ -22,13 +24,13 @@ Without `--policy`, command execution and filesystem access are denied. See the
 ## Compile to Stdout
 
 ```bash
-cargo run -- docs/examples/hello.ncr
+cargo run -- --policy docs/examples/policy.toml docs/examples/hello.ncr
 ```
 
 ## Compile to a File
 
 ```bash
-cargo run -- docs/examples/hello.ncr /tmp/hello.sh
+cargo run -- --policy docs/examples/policy.toml docs/examples/hello.ncr /tmp/hello.sh
 bash /tmp/hello.sh
 ```
 

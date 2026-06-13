@@ -7,13 +7,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 for source in docs/examples/*.ncr; do
   name="$(basename "$source" .ncr)"
   output="$tmpdir/$name.sh"
-  error="$tmpdir/$name.err"
-  if cargo run --quiet -- "$source" "$output" 2>"$error"; then
-    bash "$output" >/dev/null
-  else
-    grep -Eq '\$sh commands and shell pipelines are disabled|raw Bash blocks are disabled' "$error"
-  fi
+  cargo run --quiet -- --policy docs/examples/policy.toml "$source" "$output"
+  bash "$output" >/dev/null
 done
+rm -f docs/examples/workspace/output.txt
 
 mdbook build
 

@@ -86,7 +86,6 @@ Implemented:
 - `##` comments, blank lines, and shebang lines.
 - A static checker for the implemented expression and block subset.
 - CLI output to stdout or a file.
-- Self-compilation check for `bootstrap/self.ncr`.
 
 The broader design is documented separately in the
 [language design draft](syntax.md).

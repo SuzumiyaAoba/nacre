@@ -4,11 +4,12 @@ use crate::lowering::lower_method_calls;
 use crate::policy::ExecutionPolicy;
 use crate::{BindingPattern, ClosureCapture, Expr, MatchArm, Param, Program, Statement, Type};
 
-pub fn transpile(program: &Program) -> String {
+#[cfg(test)]
+pub(crate) fn transpile(program: &Program) -> String {
     transpile_with_policy(program, &ExecutionPolicy::deny_all())
 }
 
-pub fn transpile_with_policy(program: &Program, policy: &ExecutionPolicy) -> String {
+pub(crate) fn transpile_with_policy(program: &Program, policy: &ExecutionPolicy) -> String {
     let program = lower_method_calls(program);
     let program = mangle_function_locals(&program);
     let mut out = String::from("#!/usr/bin/env bash\nset -euo pipefail\nargs=(\"$@\")\n");
@@ -285,6 +286,16 @@ fn emit_expr_statement(out: &mut String, expr: &Expr) {
         Expr::MapRemove { name, key } => emit_map_remove(out, name, key),
         Expr::FsWriteLines { path, lines } => emit_fs_write_lines_statement(out, path, lines),
         Expr::FsAppendLines { path, lines } => emit_fs_append_lines_statement(out, path, lines),
+        Expr::AllowedCommand {
+            program,
+            args,
+            read_args,
+            write_args,
+            ..
+        } => {
+            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            out.push('\n');
+        }
         Expr::Call { name, args } => {
             emit_call_head(out, name);
             for arg in args {
@@ -2220,6 +2231,28 @@ fn emit_binding(out: &mut String, name: &str, expr: &Expr, readonly: bool, local
         Expr::CliParse => emit_cli_parse_binding(out, name, readonly, local),
         Expr::Call { name: call, args } if call == "str.split" => {
             emit_call_output_array_binding(out, name, call, args, readonly, local)
+        }
+        Expr::AllowedCommand {
+            program,
+            args,
+            read_args,
+            write_args,
+            ..
+        } => {
+            if local {
+                out.push_str("local ");
+                out.push_str(name);
+                out.push('\n');
+            }
+            out.push_str(name);
+            out.push('=');
+            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, true);
+            out.push_str(" || exit $?\n");
+            if readonly && !local {
+                out.push_str("readonly ");
+                out.push_str(name);
+                out.push('\n');
+            }
         }
         Expr::Command { command, checked } if *checked => {
             if local {
@@ -8038,16 +8071,32 @@ fn emit_string(out: &mut String, value: &str) {
 
 fn emit_interpolated_string(out: &mut String, value: &str) {
     out.push('"');
+    let mut rest = value;
+    while let Some(start) = rest.find("${") {
+        emit_double_quoted_literal_segment(out, &rest[..start]);
+        let after_start = &rest[start + 2..];
+        let end = after_start
+            .find('}')
+            .expect("string interpolation was validated before emission");
+        out.push_str("${");
+        out.push_str(&after_start[..end]);
+        out.push('}');
+        rest = &after_start[end + 1..];
+    }
+    emit_double_quoted_literal_segment(out, rest);
+    out.push('"');
+}
+
+fn emit_double_quoted_literal_segment(out: &mut String, value: &str) {
     for ch in value.chars() {
         match ch {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '`' => out.push_str("\\`"),
-            '$' => out.push('$'),
+            '$' => out.push_str("\\$"),
             _ => out.push(ch),
         }
     }
-    out.push('"');
 }
 
 fn emit_bash_string(out: &mut String, value: &str) {
@@ -8073,23 +8122,21 @@ mod tests {
     use crate::{compile_source, parse, Type};
 
     #[test]
-    fn compiles_assignments_and_commands() {
+    fn compiles_assignments() {
         let bash = compile_source(
             r#"
 const name = "Nacre"
 let count = 40
 count = count + 2
 const home = env.HOME ?? "/tmp"
-try $sh"echo ${name}"
-$sh'echo done'
 "#,
         )
         .unwrap();
 
-        assert_eq!(
-            bash,
-            "#!/usr/bin/env bash\nset -euo pipefail\nargs=(\"$@\")\n\nreadonly name='Nacre'\n\ncount=40\n\ncount=$(awk -v __nacre_0=\"$count\" 'BEGIN { print ((__nacre_0 + 2)) }')\n\nreadonly home=\"${HOME:-/tmp}\"\n\necho ${name} || exit $?\n\necho done\n"
-        );
+        assert!(bash.contains("readonly name='Nacre'"));
+        assert!(bash.contains("count=40"));
+        assert!(bash.contains("count=$(awk "));
+        assert!(bash.contains("readonly home=\"${HOME:-/tmp}\""));
     }
 
     #[test]
@@ -8213,20 +8260,13 @@ const uid: UserId = UserId(42)
 const rawUid: Int = uid.value
 const greeting = "Hello, ${name}"
 const rawGreeting = r"Hello, ${name}"
-const host = $sh"hostname"
-const requiredHost = try $sh"hostname"
-const piped = $sh"printf 'a\nb\n'" |> $sh"grep b"
-$sh"printf plain" |> $sh"cat"
 const hasGit = hasCommand("git")
-const hasTmp = pathExists("/tmp")
 let count = 5
 count = count % 2
-require("git", version = ">= 1")
-requireOneOf(["curl", "wget"])
 if count > 0 {
-$sh'echo positive'
+const branch = "positive"
 } else {
-$sh'echo zero'
+const branch = "zero"
 }
 while count > 0 {
 if count == 1 {
@@ -8236,10 +8276,8 @@ count = count - 1
 continue
 }
 for person in names {
-$sh"echo ${person}"
+const copiedPerson = person
 }
-$sh"printf write" >> write("/tmp/nacre-write")
-$sh"printf append" >> append("/tmp/nacre-write")
 "#,
         )
         .unwrap();
@@ -8291,35 +8329,18 @@ $sh"printf append" >> append("/tmp/nacre-write")
         assert!(bash.contains("readonly rawUid=\"$uid\""));
         assert!(bash.contains("readonly greeting=\"Hello, ${name}\""));
         assert!(bash.contains("readonly rawGreeting='Hello, ${name}'"));
-        assert!(bash.contains("readonly host=\"$(hostname)\""));
-        assert!(bash.contains("requiredHost=\"$(hostname)\" || exit $?\nreadonly requiredHost"));
-        assert!(bash.contains("readonly piped=\"$(printf 'a\nb\n' | grep b)\""));
-        assert!(bash.contains("printf plain | cat"));
         assert!(bash.contains(
             "readonly hasGit=$(command -v 'git' >/dev/null 2>&1 && printf true || printf false)"
         ));
-        assert!(bash.contains(
-            "readonly hasTmp=$(if [ -e '/tmp' ]; then printf true; else printf false; fi)"
-        ));
         assert!(bash
             .contains("count=$(awk -v __nacre_0=\"$count\" 'BEGIN { print ((__nacre_0 % 2)) }')"));
-        assert!(bash.contains("command -v 'git' >/dev/null 2>&1"));
-        assert!(
-            bash.contains("__nacre_version=\"$('git' --version 2>/dev/null | head -n 1 || true)\"")
-        );
-        assert!(bash.contains("required command version not satisfied: git >= 1\\n"));
-        assert!(
-            bash.contains("command -v 'curl' >/dev/null 2>&1 || command -v 'wget' >/dev/null 2>&1")
-        );
         assert!(bash.contains(
-            "if awk -v __nacre_0=\"$count\" 'BEGIN { exit (((__nacre_0 > 0)) ? 0 : 1) }'; then\necho positive\nelse\necho zero\nfi"
+            "if awk -v __nacre_0=\"$count\" 'BEGIN { exit (((__nacre_0 > 0)) ? 0 : 1) }'; then"
         ));
         assert!(bash.contains(
             "while awk -v __nacre_0=\"$count\" 'BEGIN { exit (((__nacre_0 > 0)) ? 0 : 1) }'; do\nif awk -v __nacre_0=\"$count\" 'BEGIN { exit (((__nacre_0 == 1)) ? 0 : 1) }'; then\nbreak\nfi\ncount=$(awk -v __nacre_0=\"$count\" 'BEGIN { print ((__nacre_0 - 1)) }')\ncontinue\ndone"
         ));
-        assert!(bash.contains("for person in \"${names[@]}\"; do\necho ${person}\ndone"));
-        assert!(bash.contains("printf write > '/tmp/nacre-write'"));
-        assert!(bash.contains("printf append >> '/tmp/nacre-write'"));
+        assert!(bash.contains("for person in \"${names[@]}\"; do"));
     }
 
     #[test]

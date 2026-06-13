@@ -1,5 +1,5 @@
 fn prompt(message: String): String {
-return try $sh"printf '%s' \"${message}\" >&2; IFS= read -r __nacre_reply; printf '%s' \"$__nacre_reply\""
+return run.io.prompt(message)
 }
 
 fn confirm(message: String): Bool {
@@ -9,5 +9,5 @@ return answer == "y" || answer == "Y" || answer == "yes" || answer == "YES"
 }
 
 fn promptPassword(message: String): String {
-return try $sh"printf '%s' \"${message}\" >&2; if [ -t 0 ]; then stty -echo; IFS= read -r __nacre_reply; __nacre_status=$?; stty echo; printf '\n' >&2; [ $__nacre_status -eq 0 ] || exit $__nacre_status; else IFS= read -r __nacre_reply; fi; printf '%s' \"$__nacre_reply\""
+return run.io.promptPassword(message)
 }

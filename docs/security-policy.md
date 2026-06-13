@@ -14,7 +14,7 @@ Source code invokes a statically named command:
 const status = run.inspect.git("--version")
 ```
 
-The policy maps the group and alias to one canonical executable:
+The policy maps the group and alias to one canonical executable or script:
 
 ```toml
 [command_groups.inspect.commands.git]
@@ -27,7 +27,8 @@ Nacre passes every argument directly as one Bash argument. Command names,
 pipelines, redirects, `$sh` expressions, and raw Bash blocks cannot be supplied
 by source code.
 
-Path arguments can be constrained:
+Relative program paths are resolved from the policy file directory and then
+canonicalized. Path arguments can also be constrained:
 
 ```toml
 [filesystem]
@@ -51,4 +52,3 @@ nacre --policy nacre-policy.toml input.ncr output.sh
 
 Keep policy files under human review. A Coding Agent may edit Nacre source, but
 must not be allowed to broaden the policy used to compile or run it.
-

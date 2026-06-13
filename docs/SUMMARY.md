@@ -1,5 +1,7 @@
 # Summary
 
+All code in this repository was developed by a Coding Agent.
+
 [Nacre](index.md)
 
 - [Tutorial](tutorial.md)
@@ -7,7 +9,6 @@
 - [CLI Reference](cli.md)
 - [Execution Policy](security-policy.md)
 - [Examples](examples.md)
-- [Self-Compilation](self-compilation.md)
 - [Testing and Coverage](testing-and-coverage.md)
 - [Current Limitations](limitations.md)
 - [Development Attribution](development-attribution.md)

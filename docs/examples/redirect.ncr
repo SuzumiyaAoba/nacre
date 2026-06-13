@@ -1,4 +1,0 @@
-$sh"printf write" >> write("/tmp/nacre-docs-redirect.txt")
-$sh"printf append" >> append("/tmp/nacre-docs-redirect.txt")
-$sh"sh -c 'printf err >&2'" >> append("/tmp/nacre-docs-redirect.txt", stderr = "/tmp/nacre-docs-redirect.err")
-try $sh"cat /tmp/nacre-docs-redirect.txt"

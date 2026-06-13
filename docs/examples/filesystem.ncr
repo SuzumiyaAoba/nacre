@@ -1,0 +1,4 @@
+const output = "docs/examples/workspace/output.txt"
+fs.writeLines(output, ["first", "second"])
+const lines = fs.readLines(output)
+run.output.echo(lines.join(","))

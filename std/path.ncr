@@ -3,22 +3,21 @@ return parts.join("/")
 }
 
 fn isAbsolute(value: String): Bool {
-const absolute = try $sh"case \"${value}\" in /*) printf true ;; *) printf false ;; esac"
-return absolute == "true"
+return value.isAbsolute()
 }
 
 fn basename(value: String): String {
-return try $sh"basename \"${value}\""
+return value.basename()
 }
 
 fn dirname(value: String): String {
-return try $sh"dirname \"${value}\""
+return value.dirname()
 }
 
 fn stem(value: String): String {
-return try $sh"__nacre_path_base=$(basename \"${value}\"); case \"$__nacre_path_base\" in .*.*) printf '%s' \"${__nacre_path_base%.*}\" ;; .*) printf '%s' \"$__nacre_path_base\" ;; *.*) printf '%s' \"${__nacre_path_base%.*}\" ;; *) printf '%s' \"$__nacre_path_base\" ;; esac"
+return value.stem()
 }
 
 fn extname(value: String): String {
-return try $sh"__nacre_path_base=$(basename \"${value}\"); case \"$__nacre_path_base\" in .*.*) printf '%s' \".${__nacre_path_base##*.}\" ;; .*) printf '' ;; *.*) printf '%s' \".${__nacre_path_base##*.}\" ;; *) printf '' ;; esac"
+return value.extname()
 }

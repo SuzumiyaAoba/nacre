@@ -1,5 +1,7 @@
 # Examples
 
+All code in this repository was developed by a Coding Agent.
+
 These programs are compiled and executed by `scripts/verify-docs.sh`.
 
 ## Hello
@@ -34,26 +36,18 @@ These programs are compiled and executed by `scripts/verify-docs.sh`.
 
 [Open source](examples/functions.ncr)
 
-## Pipelines
+## Approved Commands
 
 ```nacre
-{{#include examples/pipeline.ncr}}
+{{#include examples/commands.ncr}}
 ```
 
-[Open source](examples/pipeline.ncr)
+[Open source](examples/commands.ncr)
 
-## Redirects
+## Guarded Filesystem Access
 
 ```nacre
-{{#include examples/redirect.ncr}}
+{{#include examples/filesystem.ncr}}
 ```
 
-[Open source](examples/redirect.ncr)
-
-## Raw Bash
-
-```nacre
-{{#include examples/raw-block.ncr}}
-```
-
-[Open source](examples/raw-block.ncr)
+[Open source](examples/filesystem.ncr)
