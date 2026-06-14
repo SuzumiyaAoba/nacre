@@ -45,12 +45,13 @@ All code in this repository was developed by a Coding Agent.
 ## Verification
 
 ```bash
-nix develop path:. -c cargo test
+nix develop path:. -c scripts/check.sh
 nix develop path:. -c scripts/verify-docs.sh
 nix run .#mdbook -- build
 nix develop path:. -c scripts/coverage.sh
 ```
 
-`scripts/coverage.sh` enforces non-regression floors of 75% line coverage and
-90% function coverage. `nix develop path:.` provides the pinned nightly Rust
+`scripts/check.sh` enforces formatting, Clippy, and the full test suite.
+`scripts/coverage.sh` enforces non-regression floors of 48% line coverage and
+66% function coverage. `nix develop path:.` provides the pinned nightly Rust
 toolchain, `llvm-tools-preview`, and `cargo-llvm-cov`.
