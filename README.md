@@ -27,16 +27,12 @@ cargo run -- --policy nacre-policy.toml input.ncr output.sh
 ## Documentation
 
 - Published site: [suzumiyaaoba.com/nacre](https://suzumiyaaoba.com/nacre/)
-- Start here: [docs/index.md](docs/index.md)
-- Tutorial: [docs/tutorial.md](docs/tutorial.md)
-- Language reference: [docs/language-reference.md](docs/language-reference.md)
-- CLI reference: [docs/cli.md](docs/cli.md)
-- Execution policy: [docs/security-policy.md](docs/security-policy.md)
-- Testing and coverage: [docs/testing-and-coverage.md](docs/testing-and-coverage.md)
-- Current limitations: [docs/limitations.md](docs/limitations.md)
+- English: [docs/en/src/index.md](docs/en/src/index.md)
+- 日本語: [docs/ja/src/index.md](docs/ja/src/index.md)
+- Verified examples: [docs/examples](docs/examples)
 
-The long-form syntax design draft is kept at [docs/syntax.md](docs/syntax.md).
-It describes planned language features beyond the current implementation.
+The English and Japanese books contain equivalent guides, references, security
+documentation, and project information.
 
 ## Development Attribution
 
@@ -47,11 +43,13 @@ All code in this repository was developed by a Coding Agent.
 ```bash
 nix develop path:. -c scripts/check.sh
 nix develop path:. -c scripts/verify-docs.sh
-nix run .#mdbook -- build
+nix develop path:. -c scripts/build-docs.sh
 nix develop path:. -c scripts/coverage.sh
 ```
 
 `scripts/check.sh` enforces formatting, Clippy, and the full test suite.
+`scripts/verify-docs.sh` compiles and runs every documentation example, builds
+both languages, and validates generated links and code formatting.
 `scripts/coverage.sh` enforces non-regression floors of 48% line coverage and
 66% function coverage. `nix develop path:.` provides the pinned nightly Rust
 toolchain, `llvm-tools-preview`, and `cargo-llvm-cov`.

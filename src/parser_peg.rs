@@ -1630,7 +1630,7 @@ peg::parser! {
             = statements:(located_statement() ** statement_separator()) { statements }
 
         rule located_statement() -> ParsedStatement
-            = offset:position!() statement:statement()
+            = hws() offset:position!() statement:statement()
                 { ParsedStatement { offset, statement } }
 
         rule statement() -> Statement
@@ -1669,7 +1669,7 @@ peg::parser! {
 
         rule block_body() -> Program
             = line_tail() newline()+ file_trivia()
-              statements:program_items()? file_trivia()
+              statements:program_items()? file_trivia() hws()
             {
                 let statements = statements.unwrap_or_default();
                 let lines = vec![1; statements.len()];
@@ -1753,7 +1753,7 @@ peg::parser! {
             = "trait" hws1() name:type_identifier() hws()
               "[" hws() type_param:type_identifier() hws() "]"
               hws() "{" line_tail() newline()+ file_trivia()
-              methods:(trait_method() ** statement_separator())? file_trivia() "}"
+              methods:(trait_method() ** statement_separator())? file_trivia() hws() "}"
             {
                 Statement::Trait {
                     name,
@@ -1763,14 +1763,14 @@ peg::parser! {
             }
 
         rule trait_method() -> TraitMethod
-            = "fn" hws1() head:function_signature()
+            = hws() "fn" hws1() head:function_signature()
             {? super::trait_method(head) }
 
         rule impl_statement() -> Statement
             = "impl" hws1() trait_name:type_identifier() hws()
               "[" hws() for_type:type_expr() hws() "]"
               hws() "{" line_tail() newline()+ file_trivia()
-              methods:(impl_method() ** statement_separator())? file_trivia() "}"
+              methods:(impl_method() ** statement_separator())? file_trivia() hws() "}"
             {
                 Statement::Impl {
                     trait_name,
@@ -1780,7 +1780,7 @@ peg::parser! {
             }
 
         rule impl_method() -> ImplMethod
-            = "fn" hws1() head:function_signature() hws() "{"
+            = hws() "fn" hws1() head:function_signature() hws() "{"
               body:block_body() "}"
             {? super::impl_method(head, body) }
 
@@ -1808,7 +1808,7 @@ peg::parser! {
             { Statement::If { condition, then_branch, else_branch } }
 
         rule else_statement_clause() -> Program
-            = ((line_tail() newline()+ file_trivia()) / hws())
+            = ((line_tail() newline()+ file_trivia() hws()) / hws())
               "else" hws()
               statement:(if_statement() / ("{" body:block_body() "}" { Statement::Block { body } }))
             {
@@ -2410,6 +2410,36 @@ mod tests {
     }
 
     #[test]
+    fn program_grammar_accepts_indented_blocks() {
+        parse(
+            r#"
+fn classify(value: Int): String {
+    if value > 0 {
+        return "positive"
+    } else {
+        return "zero"
+    }
+}
+
+trait Show[T] {
+    fn show(value: T): String
+}
+
+impl Show[Int] {
+    fn show(value: Int): String {
+        return classify(value)
+    }
+}
+
+for value in [1, 0] {
+    const label = classify(value)
+}
+"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn program_grammar_parses_repository_sources() {
         let roots = ["docs/examples", "std"];
         for root in roots {
@@ -2421,6 +2451,48 @@ mod tests {
                 let source = std::fs::read_to_string(&path).unwrap();
                 parse(&source)
                     .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()));
+            }
+        }
+    }
+
+    #[test]
+    fn documentation_nacre_blocks_parse() {
+        for root in ["docs/en/src", "docs/ja/src"] {
+            for entry in std::fs::read_dir(root).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().and_then(|value| value.to_str()) != Some("md") {
+                    continue;
+                }
+                let markdown = std::fs::read_to_string(&path).unwrap();
+                let mut block = None::<String>;
+                let mut block_line = 0;
+
+                for (index, line) in markdown.lines().enumerate() {
+                    if line == "```nacre" {
+                        assert!(block.is_none(), "nested Nacre fence in {}", path.display());
+                        block = Some(String::new());
+                        block_line = index + 2;
+                    } else if line == "```" && block.is_some() {
+                        let source = block.take().unwrap();
+                        if !source.contains("{{#include") {
+                            parse(&source).unwrap_or_else(|error| {
+                                panic!(
+                                    "failed to parse Nacre block at {}:{block_line}: {error}",
+                                    path.display()
+                                )
+                            });
+                        }
+                    } else if let Some(source) = &mut block {
+                        source.push_str(line);
+                        source.push('\n');
+                    }
+                }
+
+                assert!(
+                    block.is_none(),
+                    "unterminated Nacre fence in {}",
+                    path.display()
+                );
             }
         }
     }

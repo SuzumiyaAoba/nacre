@@ -30,7 +30,7 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Build documentation
-        run: nix run .#mdbook -- build
+        run: nix develop path:. -c scripts/verify-docs.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

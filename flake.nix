@@ -49,6 +49,8 @@
               rustToolchain
               pkgs.cargo-llvm-cov
               pkgs.mdbook
+              pkgs.nodejs
+              pkgs.pagefind
             ];
           };
         }

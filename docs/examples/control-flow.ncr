@@ -1,20 +1,23 @@
 const names: [String] = ["alice", "bob"]
 for name in names {
-run.output.echo("name: ${name}")
+    run.output.echo("name: ${name}")
 }
 
 let count = 2
 const label = if count > 0 { "positive" } else { "zero" }
 run.output.echo("label: ${label}")
-const matched = match label { "positive" => "matched", _ => "fallback" }
+const matched = match label {
+    "positive" => "matched",
+    _ => "fallback"
+}
 run.output.echo("match: ${matched}")
 while count > 0 {
-run.output.echo("count: ${count}")
-count = count - 1
+    run.output.echo("count: ${count}")
+    count = count - 1
 }
 
 const pi = 3.14
 const doubled = pi * 2
 if doubled > 6 {
-run.output.echo("doubled: ${doubled}")
+    run.output.echo("doubled: ${doubled}")
 }

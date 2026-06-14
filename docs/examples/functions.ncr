@@ -1,5 +1,5 @@
 fn greet(name: String, prefix: String = "Hello"): String {
-return "${prefix}, ${name}"
+    return "${prefix}, ${name}"
 }
 
 const defaultGreeting = greet("Nacre")

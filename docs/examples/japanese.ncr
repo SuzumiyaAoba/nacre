@@ -1,0 +1,5 @@
+fn greet(name: String): String {
+    return "こんにちは、${name}さん"
+}
+
+run.output.echo(greet("Nacre"))
