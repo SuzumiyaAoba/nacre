@@ -74,10 +74,11 @@ write = ["output"]
 ```
 
 Roots must exist when the policy is loaded. Runtime guards resolve the requested
-path and require it to be the root itself or a descendant. A new write target
-is allowed when its parent directory exists beneath an allowed write root.
-Filesystem operations and guarded command path arguments use the resolved
-physical path after the guard succeeds.
+path and require it to be the root itself or a descendant. Existing symlink
+components in the requested path are rejected. A new write target is allowed
+when its parent directory exists beneath an allowed write root. Filesystem
+operations and guarded command path arguments use the resolved physical path
+after the guard succeeds.
 
 ## Guard Command Arguments
 
@@ -130,8 +131,12 @@ environment values, script arguments, and data files as potentially untrusted.
 Dependency packages do not carry separate authority; capability calls in them
 are checked against the same external policy as the importing program.
 
-The runtime guards reduce path escape risk but cannot eliminate filesystem
-time-of-check/time-of-use races against a concurrently malicious process.
+The runtime guards reduce path escape risk and reject symlink components, but
+they cannot eliminate filesystem time-of-check/time-of-use races against a
+concurrently malicious process. Bash alone cannot keep the checked inode open
+as an fd across every filesystem operation and external command path argument.
+Full race resistance requires a helper runtime binary that opens paths from
+directory fds with `openat`-style APIs and performs reads and writes by fd.
 
 ## Operational Guidance
 

@@ -18,8 +18,8 @@ syntax.
 - Filesystem roots must exist when the policy is loaded.
 - A new write target is permitted only when its parent directory already
   exists beneath an allowed root.
-- Final symlinks are rejected and parent directories are physically resolved,
-  but shell-based checks cannot eliminate all concurrent
+- Existing symlink components in requested paths are rejected and parent
+  directories are physically resolved, but shell-based checks cannot eliminate all concurrent
   time-of-check/time-of-use races.
 
 ## Compilation

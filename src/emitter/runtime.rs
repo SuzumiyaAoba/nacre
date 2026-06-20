@@ -16,13 +16,52 @@ pub(super) fn emit_policy_runtime(out: &mut String, policy: &ExecutionPolicy) {
     }
     out.push_str(
         r#" )
+__nacre_reject_symlink_components() {
+  local __nacre_path="$1"
+  local __nacre_root="$2"
+  if [[ "$__nacre_path" != /* ]]; then
+    __nacre_path="$PWD/$__nacre_path"
+  fi
+  local __nacre_current="/"
+  local __nacre_rest="${__nacre_path#/}"
+  local __nacre_part
+  local __nacre_candidate
+  while [[ -n "$__nacre_rest" ]]; do
+    if [[ "$__nacre_rest" == */* ]]; then
+      __nacre_part="${__nacre_rest%%/*}"
+      __nacre_rest="${__nacre_rest#*/}"
+    else
+      __nacre_part="$__nacre_rest"
+      __nacre_rest=""
+    fi
+    [[ -z "$__nacre_part" || "$__nacre_part" == "." ]] && continue
+    if [[ "$__nacre_part" == ".." ]]; then
+      __nacre_current="${__nacre_current%/*}"
+      [[ -z "$__nacre_current" ]] && __nacre_current="/"
+      continue
+    fi
+    if [[ "$__nacre_current" == "/" ]]; then
+      __nacre_candidate="/$__nacre_part"
+    else
+      __nacre_candidate="$__nacre_current/$__nacre_part"
+    fi
+    if [[ -L "$__nacre_candidate" ]]; then
+      if [[ "$__nacre_candidate" == "$__nacre_root" || "$__nacre_candidate" == "$__nacre_root/"* ]]; then
+        return 1
+      fi
+      if [[ -d "$__nacre_candidate" ]]; then
+        __nacre_current="$(cd -P -- "$__nacre_candidate" && pwd -P)" || return 1
+        continue
+      fi
+    fi
+    __nacre_current="$__nacre_candidate"
+  done
+}
+
 __nacre_resolve_guarded_path() {
   local __nacre_path="$1"
   if [[ "$__nacre_path" != /* ]]; then
     __nacre_path="$PWD/$__nacre_path"
-  fi
-  if [[ -L "$__nacre_path" ]]; then
-    return 1
   fi
   if [[ -d "$__nacre_path" ]]; then
     (cd -P -- "$__nacre_path" && pwd -P)
@@ -54,6 +93,10 @@ __nacre_checked_path() {
   local __nacre_root
   for __nacre_root in "${__nacre_roots[@]}"; do
     if [[ "$__nacre_resolved" == "$__nacre_root" || "$__nacre_resolved" == "$__nacre_root/"* ]]; then
+      if ! __nacre_reject_symlink_components "$__nacre_path" "$__nacre_root"; then
+        printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+        return 126
+      fi
       printf '%s\n' "$__nacre_resolved"
       return 0
     fi

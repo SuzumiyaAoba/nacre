@@ -294,6 +294,33 @@ fn runtime_guards_reject_paths_outside_roots() {
 }
 
 #[test]
+#[cfg(unix)]
+fn runtime_guards_reject_symlink_components() {
+    let dir = unique_dir();
+    let allowed = dir.join("allowed");
+    let real = allowed.join("real");
+    fs::create_dir_all(&real).unwrap();
+    fs::write(real.join("data.txt"), "secret\n").unwrap();
+    std::os::unix::fs::symlink(&real, allowed.join("linked")).unwrap();
+    let policy_path = dir.join("policy.toml");
+    fs::write(&policy_path, "[filesystem]\nread = [\"allowed\"]\n").unwrap();
+    let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
+    let bash = compile_source_with_policy(
+        &format!(
+            "const lines = fs.readLines({:?})",
+            allowed.join("linked/data.txt")
+        ),
+        &policy,
+    )
+    .unwrap();
+
+    let output = run_bash(&bash);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("denied read path"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn command_path_arguments_are_guarded_before_execution() {
     let dir = unique_dir();
     let allowed = dir.join("allowed");
