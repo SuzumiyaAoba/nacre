@@ -378,6 +378,162 @@ const result = made
 }
 
 #[test]
+fn compile_file_skips_policy_for_unused_imported_functions() {
+    let root = temp_dir("unused-import-policy");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("tools.ncr"),
+        r#"
+fn unused(path: String): [String] {
+return fs.readLines(path)
+}
+fn label(value: String): String {
+return "label:${value}"
+}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.tools
+const result = tools.label("ok")
+"#,
+    )
+    .unwrap();
+
+    let result = nacre::compile_file_with_policy(&main, &nacre::ExecutionPolicy::deny_all());
+    fs::remove_dir_all(root).unwrap();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn compile_file_enforces_policy_for_reachable_imported_functions() {
+    let root = temp_dir("reachable-import-policy");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("tools.ncr"),
+        r#"
+fn read(path: String): [String] {
+return fs.readLines(path)
+}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.tools
+const lines = tools.read("secret.txt")
+"#,
+    )
+    .unwrap();
+
+    let error =
+        nacre::compile_file_with_policy(&main, &nacre::ExecutionPolicy::deny_all()).unwrap_err();
+    fs::remove_dir_all(root).unwrap();
+    assert!(error.message().contains("fs.readLines requires"));
+}
+
+#[test]
+fn compile_file_enforces_policy_for_transitive_imported_functions() {
+    let root = temp_dir("transitive-import-policy");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("tools.ncr"),
+        r#"
+fn read(path: String): [String] {
+return fs.readLines(path)
+}
+fn wrapper(path: String): [String] {
+return read(path)
+}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.tools
+const lines = tools.wrapper("secret.txt")
+"#,
+    )
+    .unwrap();
+
+    let error =
+        nacre::compile_file_with_policy(&main, &nacre::ExecutionPolicy::deny_all()).unwrap_err();
+    fs::remove_dir_all(root).unwrap();
+    assert!(error.message().contains("fs.readLines requires"));
+}
+
+#[test]
+fn compile_file_enforces_policy_for_imported_function_values() {
+    let root = temp_dir("function-value-import-policy");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("tools.ncr"),
+        r#"
+fn read(path: String): [String] {
+return fs.readLines(path)
+}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.tools
+const reader: String => [String] = tools.read
+"#,
+    )
+    .unwrap();
+
+    let error =
+        nacre::compile_file_with_policy(&main, &nacre::ExecutionPolicy::deny_all()).unwrap_err();
+    fs::remove_dir_all(root).unwrap();
+    assert!(error.message().contains("fs.readLines requires"));
+}
+
+#[test]
+fn compile_file_enforces_policy_for_imported_top_level_initializers() {
+    let root = temp_dir("import-top-level-policy");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("tools.ncr"),
+        r#"
+const lines = fs.readLines("secret.txt")
+fn label(value: String): String {
+return value
+}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.tools
+const result = tools.label("ok")
+"#,
+    )
+    .unwrap();
+
+    let error =
+        nacre::compile_file_with_policy(&main, &nacre::ExecutionPolicy::deny_all()).unwrap_err();
+    fs::remove_dir_all(root).unwrap();
+    assert!(error.message().contains("fs.readLines requires"));
+}
+
+#[test]
 fn compile_file_resolves_pure_standard_modules() {
     let root = temp_dir("std");
     fs::create_dir_all(&root).unwrap();

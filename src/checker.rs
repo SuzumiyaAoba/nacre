@@ -36,6 +36,7 @@ pub(crate) fn type_check_and_lower_with_policy(
     policy: &ExecutionPolicy,
 ) -> Result<Program, CompileError> {
     let mut checker = TypeChecker::with_policy(policy.clone());
+    checker.reachable_imported_functions = Rc::new(reachable_imported_functions(program));
     collect_declared_names(program, &mut checker.reserved_names.borrow_mut());
     let program = checker.check_and_lower_program(program)?;
     let generated = checker.generated_functions.borrow();
@@ -183,11 +184,439 @@ struct TypeChecker {
     captured_bindings: Option<CapturedBindings>,
     capture_params: HashSet<String>,
     loop_depth: usize,
+    enforce_capabilities: bool,
+    reachable_imported_functions: Rc<HashSet<String>>,
 }
 
 impl Default for TypeChecker {
     fn default() -> Self {
         Self::with_policy(ExecutionPolicy::deny_all())
+    }
+}
+
+fn reachable_imported_functions(program: &Program) -> HashSet<String> {
+    let imported = program
+        .statements()
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::Function { name, .. } if is_imported_function_name(name) => {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    if imported.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut graph = HashMap::<String, HashSet<String>>::new();
+    let mut seed = HashSet::new();
+    for statement in program.statements() {
+        match statement {
+            Statement::Function { name, body, .. } if is_imported_function_name(name) => {
+                let mut refs = HashSet::new();
+                collect_program_function_refs(body, &imported, &mut refs);
+                graph.insert(name.clone(), refs);
+            }
+            Statement::Function { body, .. } => {
+                collect_program_function_refs(body, &imported, &mut seed);
+            }
+            Statement::Impl { methods, .. } => {
+                for method in methods {
+                    collect_program_function_refs(&method.body, &imported, &mut seed);
+                }
+            }
+            statement => collect_statement_function_refs(statement, &imported, &mut seed),
+        }
+    }
+
+    let mut reachable = HashSet::new();
+    let mut pending = seed.into_iter().collect::<Vec<_>>();
+    while let Some(name) = pending.pop() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(refs) = graph.get(&name) {
+            pending.extend(refs.iter().cloned());
+        }
+    }
+    reachable
+}
+
+fn is_imported_function_name(name: &str) -> bool {
+    name.contains('.')
+}
+
+fn collect_program_function_refs(
+    program: &Program,
+    functions: &HashSet<String>,
+    refs: &mut HashSet<String>,
+) {
+    for statement in program.statements() {
+        collect_statement_function_refs(statement, functions, refs);
+    }
+}
+
+fn collect_statement_function_refs(
+    statement: &Statement,
+    functions: &HashSet<String>,
+    refs: &mut HashSet<String>,
+) {
+    match statement {
+        Statement::Function { body, .. } => collect_program_function_refs(body, functions, refs),
+        Statement::Impl { methods, .. } => {
+            for method in methods {
+                collect_program_function_refs(&method.body, functions, refs);
+            }
+        }
+        Statement::Const { expr, .. }
+        | Statement::Let { expr, .. }
+        | Statement::Assign { expr, .. }
+        | Statement::Expr(expr)
+        | Statement::TryResult(expr)
+        | Statement::Return(expr) => collect_expr_function_refs(expr, functions, refs),
+        Statement::Destructure { expr, .. } => collect_expr_function_refs(expr, functions, refs),
+        Statement::Block { body } => collect_program_function_refs(body, functions, refs),
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_expr_function_refs(condition, functions, refs);
+            collect_program_function_refs(then_branch, functions, refs);
+            if let Some(else_branch) = else_branch {
+                collect_program_function_refs(else_branch, functions, refs);
+            }
+        }
+        Statement::While { condition, body } => {
+            collect_expr_function_refs(condition, functions, refs);
+            collect_program_function_refs(body, functions, refs);
+        }
+        Statement::For { iterable, body, .. } => {
+            collect_expr_function_refs(iterable, functions, refs);
+            collect_program_function_refs(body, functions, refs);
+        }
+        Statement::Trait { .. }
+        | Statement::TypeAlias { .. }
+        | Statement::SumType { .. }
+        | Statement::Newtype { .. }
+        | Statement::ExternalFunction { .. }
+        | Statement::Use { .. }
+        | Statement::TryCommand(_)
+        | Statement::TryCommandResult(_)
+        | Statement::TryPipeline { .. }
+        | Statement::TryPipelineResult { .. }
+        | Statement::Command(_)
+        | Statement::Redirect { .. }
+        | Statement::Require { .. }
+        | Statement::RequireOneOf { .. }
+        | Statement::Break
+        | Statement::Continue
+        | Statement::Raw(_) => {}
+    }
+}
+
+fn collect_expr_function_refs(
+    expr: &Expr,
+    functions: &HashSet<String>,
+    refs: &mut HashSet<String>,
+) {
+    match expr {
+        Expr::Call { name, args } => {
+            if functions.contains(name) {
+                refs.insert(name.clone());
+            }
+            collect_exprs_function_refs(args, functions, refs);
+        }
+        Expr::Ident(name) | Expr::Closure { name, .. } if functions.contains(name) => {
+            refs.insert(name.clone());
+        }
+        Expr::Field { name, field } => {
+            let qualified = format!("{name}.{field}");
+            if functions.contains(&qualified) {
+                refs.insert(qualified);
+            }
+        }
+        Expr::Some(value)
+        | Expr::Ok(value)
+        | Expr::Err(value)
+        | Expr::ResultOption(value)
+        | Expr::TryResult(value)
+        | Expr::PathExists(value)
+        | Expr::IndexValue { value, .. }
+        | Expr::ArraySliceValue { value, .. }
+        | Expr::TupleFieldValue { value, .. }
+        | Expr::FieldValue { value, .. }
+        | Expr::Cast { expr: value, .. }
+        | Expr::ArrayLenValue(value)
+        | Expr::MapLenValue(value)
+        | Expr::ArrayIsEmptyValue(value)
+        | Expr::MapIsEmptyValue(value)
+        | Expr::ArrayFirstValue(value)
+        | Expr::ArrayLastValue(value)
+        | Expr::ArrayReverseValue(value)
+        | Expr::ArraySortValue(value)
+        | Expr::ArrayUniqueValue(value)
+        | Expr::MapKeysValue(value)
+        | Expr::MapValuesValue(value)
+        | Expr::StringLenValue(value)
+        | Expr::StringIsEmptyValue(value)
+        | Expr::StringTrimValue(value)
+        | Expr::StringTrimStartValue(value)
+        | Expr::StringTrimEndValue(value)
+        | Expr::StringToUpperValue(value)
+        | Expr::StringToLowerValue(value)
+        | Expr::PathBasenameValue(value)
+        | Expr::PathDirnameValue(value)
+        | Expr::PathStemValue(value)
+        | Expr::PathExtnameValue(value)
+        | Expr::PathIsAbsoluteValue(value)
+        | Expr::ProcessEnv { name: value }
+        | Expr::FsIsFile { path: value }
+        | Expr::FsIsDir { path: value }
+        | Expr::FsSize { path: value }
+        | Expr::FsReadLines { path: value }
+        | Expr::FsList { path: value }
+        | Expr::JsonParse { value }
+        | Expr::JsonStringifyValue { value }
+        | Expr::MatchGuardResult(value)
+        | Expr::Not(value)
+        | Expr::BitNot(value)
+        | Expr::NewtypeCtor { value, .. } => collect_expr_function_refs(value, functions, refs),
+        Expr::Default { value, fallback }
+        | Expr::DefaultTry { value, fallback }
+        | Expr::OptionOrElseValue { value, fallback }
+        | Expr::OptionOrElseTry { value, fallback }
+        | Expr::Binary {
+            left: value,
+            right: fallback,
+            ..
+        } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(fallback, functions, refs);
+        }
+        Expr::LetIn { value, body, .. } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(body, functions, refs);
+        }
+        Expr::OptionOrElse { fallback, .. } => {
+            collect_expr_function_refs(fallback, functions, refs);
+        }
+        Expr::AllowedCommand { args, .. }
+        | Expr::Array(args)
+        | Expr::Tuple(args)
+        | Expr::Variant { args, .. } => collect_exprs_function_refs(args, functions, refs),
+        Expr::Map(entries) => {
+            for (key, value) in entries {
+                collect_expr_function_refs(key, functions, refs);
+                collect_expr_function_refs(value, functions, refs);
+            }
+        }
+        Expr::Record(fields) => {
+            for (_, value) in fields {
+                collect_expr_function_refs(value, functions, refs);
+            }
+        }
+        Expr::RecordPattern(fields) => {
+            for (_, value) in fields {
+                if let Some(value) = value {
+                    collect_expr_function_refs(value, functions, refs);
+                }
+            }
+        }
+        Expr::Index { index, .. }
+        | Expr::ArrayMap { mapper: index, .. }
+        | Expr::OptionMap { mapper: index, .. }
+        | Expr::OptionFlatMap { mapper: index, .. }
+        | Expr::ResultMap { mapper: index, .. }
+        | Expr::ResultFlatMap { mapper: index, .. }
+        | Expr::OptionAp { value: index, .. }
+        | Expr::ResultAp { value: index, .. }
+        | Expr::ArrayTake { count: index, .. }
+        | Expr::ArrayDrop { count: index, .. }
+        | Expr::Join {
+            separator: index, ..
+        }
+        | Expr::ArrayPush { value: index, .. }
+        | Expr::ArrayContains { value: index, .. }
+        | Expr::ArrayIndexOf { value: index, .. }
+        | Expr::MapHas { key: index, .. }
+        | Expr::MapRemove { key: index, .. }
+        | Expr::StringContains { needle: index, .. }
+        | Expr::StringIndexOf { needle: index, .. }
+        | Expr::StringStartsWith { prefix: index, .. }
+        | Expr::StringEndsWith { suffix: index, .. }
+        | Expr::StringRepeat { count: index, .. }
+        | Expr::StringSplit {
+            separator: index, ..
+        } => collect_expr_function_refs(index, functions, refs),
+        Expr::Slice { start, end, .. } | Expr::StringSlice { start, end, .. } => {
+            collect_expr_function_refs(start, functions, refs);
+            collect_expr_function_refs(end, functions, refs);
+        }
+        Expr::StringSliceValue { value, start, end } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(start, functions, refs);
+            collect_expr_function_refs(end, functions, refs);
+        }
+        Expr::ArrayMapValue { value, mapper }
+        | Expr::OptionMapValue { value, mapper }
+        | Expr::OptionFlatMapValue { value, mapper }
+        | Expr::ResultMapValue { value, mapper }
+        | Expr::ResultFlatMapValue { value, mapper } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(mapper, functions, refs);
+        }
+        Expr::OptionApValue { function, value } | Expr::ResultApValue { function, value } => {
+            collect_expr_function_refs(function, functions, refs);
+            collect_expr_function_refs(value, functions, refs);
+        }
+        Expr::ArrayTakeValue { value, count }
+        | Expr::ArrayDropValue { value, count }
+        | Expr::JoinValue {
+            value,
+            separator: count,
+        }
+        | Expr::ArrayContainsValue { value, item: count }
+        | Expr::ArrayIndexOfValue { value, item: count }
+        | Expr::MapHasValue { value, key: count }
+        | Expr::StringContainsValue {
+            value,
+            needle: count,
+        }
+        | Expr::StringIndexOfValue {
+            value,
+            needle: count,
+        }
+        | Expr::StringStartsWithValue {
+            value,
+            prefix: count,
+        }
+        | Expr::StringEndsWithValue {
+            value,
+            suffix: count,
+        }
+        | Expr::StringRepeatValue { value, count }
+        | Expr::StringSplitValue {
+            value,
+            separator: count,
+        } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(count, functions, refs);
+        }
+        Expr::MapSet { key, value, .. }
+        | Expr::FsWriteLines {
+            path: key,
+            lines: value,
+        }
+        | Expr::FsAppendLines {
+            path: key,
+            lines: value,
+        } => {
+            collect_expr_function_refs(key, functions, refs);
+            collect_expr_function_refs(value, functions, refs);
+        }
+        Expr::StringReplace { from, to, .. } => {
+            collect_expr_function_refs(from, functions, refs);
+            collect_expr_function_refs(to, functions, refs);
+        }
+        Expr::StringReplaceValue { value, from, to } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(from, functions, refs);
+            collect_expr_function_refs(to, functions, refs);
+        }
+        Expr::IfElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            collect_expr_function_refs(condition, functions, refs);
+            collect_expr_function_refs(then_expr, functions, refs);
+            collect_expr_function_refs(else_expr, functions, refs);
+        }
+        Expr::Match { value, arms } => {
+            collect_expr_function_refs(value, functions, refs);
+            for arm in arms {
+                if let Some(pattern) = &arm.pattern {
+                    collect_expr_function_refs(pattern, functions, refs);
+                }
+                if let Some(guard) = &arm.guard {
+                    collect_expr_function_refs(guard, functions, refs);
+                }
+                collect_expr_function_refs(&arm.expr, functions, refs);
+            }
+        }
+        Expr::Lambda { body, .. } => collect_expr_function_refs(body, functions, refs),
+        Expr::Do { steps, result } => {
+            for step in steps {
+                match step {
+                    DoStep::Bind { expr, .. } | DoStep::Let { expr, .. } => {
+                        collect_expr_function_refs(expr, functions, refs);
+                    }
+                }
+            }
+            collect_expr_function_refs(result, functions, refs);
+        }
+        Expr::Pipeline { input, .. }
+        | Expr::TryPipeline { input, .. }
+        | Expr::PipelineResult { input, .. } => {
+            if let Some(input) = input {
+                collect_expr_function_refs(input, functions, refs);
+            }
+        }
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::RawString(_)
+        | Expr::Unit
+        | Expr::None
+        | Expr::Command { .. }
+        | Expr::CommandResult { .. }
+        | Expr::AsyncCommand(_)
+        | Expr::Await(_)
+        | Expr::HasCommand(_)
+        | Expr::TupleField { .. }
+        | Expr::Value(_)
+        | Expr::Len(_)
+        | Expr::IsEmpty(_)
+        | Expr::ArrayFirst(_)
+        | Expr::ArrayLast(_)
+        | Expr::ArrayReverse(_)
+        | Expr::ArraySort(_)
+        | Expr::ArrayUnique(_)
+        | Expr::ArrayPop { .. }
+        | Expr::MapKeys(_)
+        | Expr::MapValues(_)
+        | Expr::StringLen(_)
+        | Expr::StringIsEmpty(_)
+        | Expr::StringTrim(_)
+        | Expr::StringTrimStart(_)
+        | Expr::StringTrimEnd(_)
+        | Expr::StringToUpper(_)
+        | Expr::StringToLower(_)
+        | Expr::PathBasename(_)
+        | Expr::PathDirname(_)
+        | Expr::PathStem(_)
+        | Expr::PathExtname(_)
+        | Expr::PathIsAbsolute(_)
+        | Expr::EnvDefault { .. }
+        | Expr::Env(_)
+        | Expr::ProcessArgs
+        | Expr::CliParse
+        | Expr::JsonStringify { .. }
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => {}
+    }
+}
+
+fn collect_exprs_function_refs(
+    values: &[Expr],
+    functions: &HashSet<String>,
+    refs: &mut HashSet<String>,
+) {
+    for value in values {
+        collect_expr_function_refs(value, functions, refs);
     }
 }
 
@@ -216,11 +645,17 @@ impl TypeChecker {
             captured_bindings: None,
             capture_params: HashSet::new(),
             loop_depth: 0,
+            enforce_capabilities: true,
+            reachable_imported_functions: Rc::new(HashSet::new()),
         }
     }
 }
 
 impl TypeChecker {
+    fn should_enforce_function_capabilities(&self, name: &str) -> bool {
+        !is_imported_function_name(name) || self.reachable_imported_functions.contains(name)
+    }
+
     fn check_program(&mut self, program: &Program) -> Result<(), CompileError> {
         let mut reachable = true;
         for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
@@ -826,7 +1261,14 @@ impl TypeChecker {
                     type_params: type_params.to_vec(),
                     params: params.to_vec(),
                     return_type: return_type.clone(),
-                    body: self.lower_function_body(type_params, params, return_type, body, line)?,
+                    body: self.lower_function_body(
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        line,
+                    )?,
                 })
             }
             Statement::Const {
@@ -1366,6 +1808,7 @@ impl TypeChecker {
         }
 
         let mut body_checker = self.clone();
+        body_checker.enforce_capabilities = self.should_enforce_function_capabilities(name);
         body_checker.expected_return = Some(resolved_return.clone());
         body_checker.loop_depth = 0;
         for param in resolved_params {
@@ -1475,6 +1918,7 @@ impl TypeChecker {
 
     fn lower_function_body(
         &self,
+        name: &str,
         type_params: &[TypeParam],
         params: &[Param],
         return_type: &Type,
@@ -1487,6 +1931,7 @@ impl TypeChecker {
             .collect::<HashSet<_>>();
         let resolved_return = self.resolve_type_with_generics(return_type, &generic_names, line)?;
         let mut body_checker = self.clone();
+        body_checker.enforce_capabilities = self.should_enforce_function_capabilities(name);
         body_checker.expected_return = Some(resolved_return.clone());
         body_checker.loop_depth = 0;
         for param in params {
@@ -1965,12 +2410,20 @@ impl TypeChecker {
         methods
             .iter()
             .map(|method| {
+                let lowered_name = impl_method_name(trait_name, for_type, &method.name);
                 let params = &method.params;
                 let return_type = &method.return_type;
                 let method_body = &method.body;
-                let body = self.lower_function_body(&[], params, return_type, method_body, line)?;
+                let body = self.lower_function_body(
+                    &lowered_name,
+                    &[],
+                    params,
+                    return_type,
+                    method_body,
+                    line,
+                )?;
                 Ok(ImplMethod {
-                    name: impl_method_name(trait_name, for_type, &method.name),
+                    name: lowered_name,
                     params: method.params.clone(),
                     return_type: method.return_type.clone(),
                     body,
@@ -2645,12 +3098,15 @@ impl TypeChecker {
                 result,
                 ..
             } => {
-                let policy = self.policy.command(group, command).ok_or_else(|| {
-                    CompileError::new(
+                let policy = self.policy.command(group, command);
+                if self.enforce_capabilities && policy.is_none() {
+                    return Err(CompileError::new(
                         line,
-                        format!("command `{group}.{command}` is not allowed by the execution policy"),
-                    )
-                })?;
+                        format!(
+                            "command `{group}.{command}` is not allowed by the execution policy"
+                        ),
+                    ));
+                }
                 Ok(Expr::AllowedCommand {
                     group: group.clone(),
                     command: command.clone(),
@@ -2659,9 +3115,13 @@ impl TypeChecker {
                         .map(|arg| self.lower_expr(arg, line))
                         .collect::<Result<Vec<_>, _>>()?,
                     result: *result,
-                    program: Some(policy.program().to_string_lossy().into_owned()),
-                    read_args: policy.read_args().to_vec(),
-                    write_args: policy.write_args().to_vec(),
+                    program: policy.map(|policy| policy.program().to_string_lossy().into_owned()),
+                    read_args: policy
+                        .map(|policy| policy.read_args().to_vec())
+                        .unwrap_or_default(),
+                    write_args: policy
+                        .map(|policy| policy.write_args().to_vec())
+                        .unwrap_or_default(),
                 })
             }
             Expr::Call { name, args } => {
@@ -4353,28 +4813,6 @@ impl TypeChecker {
         result: bool,
         line: usize,
     ) -> Result<Type, CompileError> {
-        let Some(policy) = self.policy.command(group, command) else {
-            return Err(CompileError::new(
-                line,
-                format!("command `{group}.{command}` is not allowed by the execution policy"),
-            ));
-        };
-        if args.len() != policy.args() {
-            return Err(CompileError::new(
-                line,
-                format!(
-                    "command `{group}.{command}` expects {} by policy, found {}",
-                    argument_count(policy.args()),
-                    args.len()
-                ),
-            ));
-        }
-        if !policy.read_args().is_empty() {
-            self.require_read_access(&format!("command `{group}.{command}`"), line)?;
-        }
-        if !policy.write_args().is_empty() {
-            self.require_write_access(&format!("command `{group}.{command}`"), line)?;
-        }
         for arg in args {
             let ty = self.check_expr(arg, line)?;
             if !matches!(
@@ -4390,6 +4828,30 @@ impl TypeChecker {
                 ));
             }
         }
+        if self.enforce_capabilities {
+            let Some(policy) = self.policy.command(group, command) else {
+                return Err(CompileError::new(
+                    line,
+                    format!("command `{group}.{command}` is not allowed by the execution policy"),
+                ));
+            };
+            if args.len() != policy.args() {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "command `{group}.{command}` expects {} by policy, found {}",
+                        argument_count(policy.args()),
+                        args.len()
+                    ),
+                ));
+            }
+            if !policy.read_args().is_empty() {
+                self.require_read_access(&format!("command `{group}.{command}`"), line)?;
+            }
+            if !policy.write_args().is_empty() {
+                self.require_write_access(&format!("command `{group}.{command}`"), line)?;
+            }
+        }
         if result {
             Ok(command_output_type())
         } else {
@@ -4398,6 +4860,9 @@ impl TypeChecker {
     }
 
     fn require_read_access(&self, operation: &str, line: usize) -> Result<(), CompileError> {
+        if !self.enforce_capabilities {
+            return Ok(());
+        }
         if self.policy.has_read_access() {
             Ok(())
         } else {
@@ -4409,6 +4874,9 @@ impl TypeChecker {
     }
 
     fn require_write_access(&self, operation: &str, line: usize) -> Result<(), CompileError> {
+        if !self.enforce_capabilities {
+            return Ok(());
+        }
         if self.policy.has_write_access() {
             Ok(())
         } else {
@@ -4426,6 +4894,9 @@ impl TypeChecker {
                 format!("invalid environment variable name `{name}`"),
             ));
         }
+        if !self.enforce_capabilities {
+            return Ok(());
+        }
         if self.policy.can_read_env(name) {
             Ok(())
         } else {
@@ -4441,6 +4912,9 @@ impl TypeChecker {
         statement: &Statement,
         line: usize,
     ) -> Result<(), CompileError> {
+        if !self.enforce_capabilities {
+            return Ok(());
+        }
         if statement_uses_process_args(statement) && !self.policy.can_read_process_args() {
             Err(CompileError::new(
                 line,

@@ -24,8 +24,10 @@ syntax.
 
 ## Compilation
 
-- Imported modules are checked as a whole. A capability call in an unused
-  function can therefore require the corresponding policy capability.
+- Imported modules are type-checked as a whole, but capability calls inside
+  unreferenced imported function bodies do not require policy capabilities.
+  Function-value references count as reachable. Top-level initializers and
+  trait implementations are checked conservatively.
 - Some structured values use compiler-provided Bash runtime helpers.
 - Diagnostics include line, column, source-line, and caret output, but there is
   not yet a dedicated LSP server or CLI JSON output.
