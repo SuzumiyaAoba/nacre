@@ -60,7 +60,17 @@ fn public_api_accessors_and_parse_errors() {
 
     let error = nacre::compile_source("const bad-name = 1").unwrap_err();
     assert_eq!(error.line(), 1);
+    assert_eq!(error.column(), 1);
+    assert_eq!(error.end_line(), 1);
+    assert_eq!(error.source_name(), Some("<source>"));
+    assert_eq!(error.source_line(), Some("const bad-name = 1"));
     assert!(error.message().contains("invalid variable name"));
+    assert!(error.to_string().contains("^"));
+
+    let syntax = nacre::compile_source("const value = @").unwrap_err();
+    assert_eq!(syntax.line(), 1);
+    assert!(syntax.column() > 1);
+    assert!(syntax.message().contains("invalid syntax"));
 }
 
 #[test]

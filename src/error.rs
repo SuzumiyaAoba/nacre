@@ -3,26 +3,111 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileError {
     line: usize,
+    column: usize,
+    end_line: usize,
+    end_column: usize,
     message: String,
+    source_name: Option<String>,
+    source_line: Option<String>,
 }
 
 impl CompileError {
     pub(crate) fn new(line: usize, message: String) -> Self {
-        Self { line, message }
+        Self::with_span(line, 1, line, 1, message)
+    }
+
+    pub(crate) fn with_span(
+        line: usize,
+        column: usize,
+        end_line: usize,
+        end_column: usize,
+        message: String,
+    ) -> Self {
+        Self {
+            line,
+            column: column.max(1),
+            end_line: end_line.max(line),
+            end_column: end_column.max(column.max(1)),
+            message,
+            source_name: None,
+            source_line: None,
+        }
+    }
+
+    pub(crate) fn with_source_context(
+        mut self,
+        source_name: impl Into<String>,
+        source: &str,
+    ) -> Self {
+        if self.line == 0 || self.source_line.is_some() {
+            return self;
+        }
+        self.source_name = Some(source_name.into());
+        self.source_line = source
+            .lines()
+            .nth(self.line.saturating_sub(1))
+            .map(str::to_string);
+        self
     }
 
     pub fn line(&self) -> usize {
         self.line
     }
 
+    pub fn column(&self) -> usize {
+        self.column
+    }
+
+    pub fn end_line(&self) -> usize {
+        self.end_line
+    }
+
+    pub fn end_column(&self) -> usize {
+        self.end_column
+    }
+
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    pub fn source_name(&self) -> Option<&str> {
+        self.source_name.as_deref()
+    }
+
+    pub fn source_line(&self) -> Option<&str> {
+        self.source_line.as_deref()
     }
 }
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}: {}", self.line, self.message)
+        if self.line == 0 {
+            return write!(f, "{}", self.message);
+        }
+        write!(f, "line {}:{}: {}", self.line, self.column, self.message)?;
+        if let Some(source_line) = &self.source_line {
+            let label = self.source_name.as_deref().unwrap_or("<source>");
+            let width = self.line.to_string().len();
+            let column = self.column.max(1);
+            let marker_len = if self.end_line == self.line {
+                self.end_column.saturating_sub(column).max(1)
+            } else {
+                1
+            };
+            write!(
+                f,
+                "\n --> {label}:{}:{}\n{:>width$} | {}\n{:>width$} | {}{}",
+                self.line,
+                column,
+                self.line,
+                source_line,
+                "",
+                " ".repeat(column.saturating_sub(1)),
+                "^".repeat(marker_len),
+                width = width
+            )?;
+        }
+        Ok(())
     }
 }
 

@@ -27,8 +27,8 @@ syntax.
 - Imported modules are checked as a whole. A capability call in an unused
   function can therefore require the corresponding policy capability.
 - Some structured values use compiler-provided Bash runtime helpers.
-- Diagnostics report source lines, but do not yet provide rich source spans or
-  editor integration.
+- Diagnostics include line, column, source-line, and caret output, but there is
+  not yet a dedicated LSP server or CLI JSON output.
 - Dependency resolution supports only local path dependencies from
   `nacre.toml`. There is not yet a stable public registry or lockfile.
 

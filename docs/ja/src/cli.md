@@ -65,7 +65,9 @@ cargo run -- \
 - 構文、型、権限の検査に失敗
 - 出力ファイルの書き込みに失敗
 
-利用できる場合、エラーにはソース行が含まれます。
+利用できる場合、エラーにはファイル名、行、列、該当するソース行、caret による範囲表示が
+含まれます。機械可読な診断が必要なツールは、CLI の表示を解析せず、Rust API の
+`CompileError` accessors を使用してください。
 
 ## ライブラリ API
 
@@ -76,4 +78,7 @@ use nacre::{compile_file, compile_file_with_policy};
 ```
 
 メモリ上のソースには `compile_source` と `compile_source_with_policy` を
-使用します。すべて `Result<String, CompileError>` を返します。
+使用します。すべて `Result<String, CompileError>` を返します。`CompileError` は
+既存の `line()` と `message()` に加えて、`column()`、`end_line()`、
+`end_column()`、`source_name()`、`source_line()` を提供します。LSP や JSON 出力を
+追加する場合は、この構造化診断モデルを正本として扱います。

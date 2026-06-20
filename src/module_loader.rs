@@ -142,7 +142,8 @@ fn parse_file_expanded(
     if !seen.insert(canonical) {
         return Ok(Program::new(Vec::new(), Vec::new()));
     }
-    let program = parse(&source)?;
+    let program = parse(&source)
+        .map_err(|error| error.with_source_context(path.display().to_string(), &source))?;
     expand_modules(
         program,
         path.parent().unwrap_or_else(|| Path::new(".")),
@@ -400,6 +401,23 @@ mod tests {
         assert!(error
             .message()
             .contains("dependency `tools` path is not a directory"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compile_file_parse_error_keeps_source_context() {
+        let root = temp_path("parse-context");
+        fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.ncr");
+        fs::write(&main, "const bad-name = 1\n").unwrap();
+
+        let error = compile_file(&main).unwrap_err();
+        let source_name = main.display().to_string();
+        assert_eq!(error.line(), 1);
+        assert_eq!(error.source_name(), Some(source_name.as_str()));
+        assert_eq!(error.source_line(), Some("const bad-name = 1"));
+        assert!(error.to_string().contains("^"));
 
         fs::remove_dir_all(root).unwrap();
     }

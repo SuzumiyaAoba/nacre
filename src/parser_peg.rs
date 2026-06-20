@@ -385,8 +385,11 @@ fn program_parse_error(
             }
         }
     }
-    CompileError::new(
+    CompileError::with_span(
         error.location.line,
+        error.location.column,
+        error.location.line,
+        error.location.column + 1,
         format!(
             "invalid syntax at column {}: expected {}",
             error.location.column, error.expected

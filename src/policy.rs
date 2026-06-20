@@ -99,9 +99,11 @@ impl ExecutionPolicy {
             )
         })?;
         let parsed = toml::from_str::<PolicyFile>(&source).map_err(|error| {
-            CompileError::new(
-                0,
+            policy_parse_error(
+                &source,
+                Some(path.display().to_string()),
                 format!("failed to parse policy {}: {error}", path.display()),
+                error.span(),
             )
         })?;
         let base = path.parent().unwrap_or_else(|| Path::new("."));
@@ -110,7 +112,12 @@ impl ExecutionPolicy {
 
     pub fn from_toml(source: &str, base: &Path) -> Result<Self, CompileError> {
         let parsed = toml::from_str::<PolicyFile>(source).map_err(|error| {
-            CompileError::new(0, format!("failed to parse policy source: {error}"))
+            policy_parse_error(
+                source,
+                None,
+                format!("failed to parse policy source: {error}"),
+                error.span(),
+            )
         })?;
         Self::from_parsed(parsed, base)
     }
@@ -280,6 +287,39 @@ impl CommandPolicy {
     }
 }
 
+fn policy_parse_error(
+    source: &str,
+    source_name: Option<String>,
+    message: String,
+    span: Option<std::ops::Range<usize>>,
+) -> CompileError {
+    let label = source_name.unwrap_or_else(|| "<policy>".to_string());
+    let Some(span) = span else {
+        return CompileError::new(1, message).with_source_context(label, source);
+    };
+    let (line, column) = line_column_at(source, span.start);
+    let (end_line, end_column) = line_column_at(source, span.end.max(span.start + 1));
+    CompileError::with_span(line, column, end_line, end_column, message)
+        .with_source_context(label, source)
+}
+
+fn line_column_at(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut column = 1;
+    for (index, ch) in source.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
+}
+
 fn environment_names(names: Vec<String>) -> Result<BTreeSet<String>, CompileError> {
     let mut allowed = BTreeSet::new();
     for name in names {
@@ -391,5 +431,16 @@ mod tests {
         let policy =
             ExecutionPolicy::from_toml("[process]\nargs = true\n", Path::new(".")).unwrap();
         assert!(policy.can_read_process_args());
+    }
+
+    #[test]
+    fn parse_errors_include_span_and_source_context() {
+        let error =
+            ExecutionPolicy::from_toml("[environment]\nread = [\n", Path::new(".")).unwrap_err();
+        assert!(error.line() > 0);
+        assert!(error.column() > 0);
+        assert_eq!(error.source_name(), Some("<policy>"));
+        assert!(error.source_line().is_some());
+        assert!(error.to_string().contains("^"));
     }
 }

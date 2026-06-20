@@ -29,8 +29,8 @@ pub fn compile_source_with_policy(
     source: &str,
     policy: &ExecutionPolicy,
 ) -> Result<String, CompileError> {
-    let program = parse(source)?;
-    compile_program(&program, policy)
+    let program = parse(source).map_err(|error| error.with_source_context("<source>", source))?;
+    compile_program(&program, policy).map_err(|error| error.with_source_context("<source>", source))
 }
 
 pub fn compile_file(path: &Path) -> Result<String, CompileError> {
@@ -41,11 +41,19 @@ pub fn compile_file_with_policy(
     path: &Path,
     policy: &ExecutionPolicy,
 ) -> Result<String, CompileError> {
-    let program = module_loader::load_program(path)?;
-    compile_program(&program, policy)
+    let program =
+        module_loader::load_program(path).map_err(|error| attach_file_context(error, path))?;
+    compile_program(&program, policy).map_err(|error| attach_file_context(error, path))
 }
 
 fn compile_program(program: &Program, policy: &ExecutionPolicy) -> Result<String, CompileError> {
     let program = checker::type_check_and_lower_with_policy(program, policy)?;
     Ok(emitter::transpile_with_policy(&program, policy))
+}
+
+fn attach_file_context(error: CompileError, path: &Path) -> CompileError {
+    match std::fs::read_to_string(path) {
+        Ok(source) => error.with_source_context(path.display().to_string(), &source),
+        Err(_) => error,
+    }
 }

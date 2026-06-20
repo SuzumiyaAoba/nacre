@@ -65,7 +65,9 @@ It exits unsuccessfully for:
 - Parse, type, or capability errors.
 - Output write errors.
 
-Errors include the source line when one is available.
+When available, errors include the file name, line, column, source line, and a
+caret range. Tools that need machine-readable diagnostics should use the Rust
+API `CompileError` accessors rather than parsing CLI text.
 
 ## Library API
 
@@ -77,3 +79,7 @@ use nacre::{compile_file, compile_file_with_policy};
 
 `compile_source` and `compile_source_with_policy` provide the corresponding
 in-memory source APIs. All return `Result<String, CompileError>`.
+`CompileError` keeps the existing `line()` and `message()` accessors and also
+provides `column()`, `end_line()`, `end_column()`, `source_name()`, and
+`source_line()`. Future LSP or JSON output should be built from this structured
+diagnostic model.

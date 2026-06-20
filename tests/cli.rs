@@ -15,6 +15,7 @@ fn cli_writes_to_stdout_and_file_and_reports_usage() {
     let command_input = dir.join("command.ncr");
     let command_output = dir.join("command.sh");
     let command_script = dir.join("approved-command");
+    let invalid_input = dir.join("invalid.ncr");
     let policy = dir.join("policy.toml");
     fs::write(
         &input,
@@ -33,6 +34,7 @@ const cmp = count >= 7
         "const output = run.inspect.command(\"safe\")\n",
     )
     .unwrap();
+    fs::write(&invalid_input, "const value: Bool = 1\n").unwrap();
     fs::write(
         &command_script,
         "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$@\"\n",
@@ -100,6 +102,16 @@ const cmp = count >= 7
     assert!(String::from_utf8(usage_run.stderr)
         .unwrap()
         .contains("usage: nacre"));
+
+    let invalid_run = Command::new(env!("CARGO_BIN_EXE_nacre"))
+        .arg(&invalid_input)
+        .output()
+        .unwrap();
+    assert!(!invalid_run.status.success());
+    let invalid_stderr = String::from_utf8(invalid_run.stderr).unwrap();
+    assert!(invalid_stderr.contains("line 1:1"));
+    assert!(invalid_stderr.contains("const value: Bool = 1"));
+    assert!(invalid_stderr.contains("^"));
 
     let missing_run = Command::new(env!("CARGO_BIN_EXE_nacre"))
         .arg(dir.join(format!("missing-{unique}.ncr")))
