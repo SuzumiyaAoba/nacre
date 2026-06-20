@@ -241,5 +241,19 @@ fn malformed_policies_are_rejected() {
         .unwrap_err()
         .to_string()
         .contains("failed to parse policy"));
+
+    let writable_program = dir.join("writable-program.toml");
+    fs::write(
+        &writable_program,
+        "[filesystem]\nwrite = [\".\"]\n\n[command_groups.test.commands.command]\nprogram = \"command\"\n",
+    )
+    .unwrap();
+    let error = ExecutionPolicy::from_file(&writable_program).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("inside writable filesystem root"),
+        "{error}"
+    );
     fs::remove_dir_all(dir).unwrap();
 }

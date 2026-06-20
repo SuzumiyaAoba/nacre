@@ -17,7 +17,9 @@ This command runs:
 
 The tests cover parsing, type checking, Bash emission, public APIs, CLI
 behavior, policy validation, runtime path guards, modules, and representative
-language programs.
+language programs. Control-flow tests enforce all-path function returns,
+loop-only `break` and `continue`, unreachable-code rejection, and implicit
+return lowering.
 
 ## Documentation Verification
 

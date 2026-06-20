@@ -17,6 +17,8 @@ nix develop path:. -c scripts/check.sh
 
 テストは、構文解析、型検査、Bash 出力、公開 API、CLI、ポリシー検証、
 実行時パスガード、モジュール、代表的な言語プログラムを対象とします。
+制御フローについては、関数の全経路 return、`break` と `continue` の
+ループ内限定、到達不能コードの拒否、暗黙 return の変換を検証します。
 
 ## ドキュメントの検証
 

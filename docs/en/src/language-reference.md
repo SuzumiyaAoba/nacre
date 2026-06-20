@@ -153,7 +153,12 @@ const label = if count == 0 {
 ```
 
 `if`, `else if`, `else`, `while`, `for`, `break`, and `continue` are
-implemented. Bare blocks create a static scope.
+implemented. Bare blocks create a static scope. `break` and `continue` are
+valid only inside loops, and statements after an unconditional control-flow
+exit are rejected as unreachable.
+
+Every path through a non-`Unit` function must return a value. A final expression
+is an implicit return, including when earlier branches return explicitly.
 
 ## Pattern Matching
 

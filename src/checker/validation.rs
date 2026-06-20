@@ -2,22 +2,115 @@ use crate::{CompileError, Expr, Program, Statement, Type};
 
 use super::names::is_valid_name;
 
-pub(super) fn program_has_return(program: &Program) -> bool {
-    program.statements().iter().any(statement_has_return)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FlowSummary {
+    pub(super) falls_through: bool,
+    returns: bool,
+    breaks: bool,
+    continues: bool,
 }
 
-pub(super) fn statement_has_return(statement: &Statement) -> bool {
+impl FlowSummary {
+    const fn falls_through() -> Self {
+        Self {
+            falls_through: true,
+            returns: false,
+            breaks: false,
+            continues: false,
+        }
+    }
+
+    const fn returned() -> Self {
+        Self {
+            falls_through: false,
+            returns: true,
+            breaks: false,
+            continues: false,
+        }
+    }
+
+    const fn broke() -> Self {
+        Self {
+            falls_through: false,
+            returns: false,
+            breaks: true,
+            continues: false,
+        }
+    }
+
+    const fn continued() -> Self {
+        Self {
+            falls_through: false,
+            returns: false,
+            breaks: false,
+            continues: true,
+        }
+    }
+
+    const fn try_result() -> Self {
+        Self {
+            falls_through: true,
+            returns: true,
+            breaks: false,
+            continues: false,
+        }
+    }
+
+    fn alternatives(left: Self, right: Self) -> Self {
+        Self {
+            falls_through: left.falls_through || right.falls_through,
+            returns: left.returns || right.returns,
+            breaks: left.breaks || right.breaks,
+            continues: left.continues || right.continues,
+        }
+    }
+
+    pub(super) fn always_returns(self) -> bool {
+        !self.falls_through && self.returns && !self.breaks && !self.continues
+    }
+}
+
+pub(super) fn program_flow(program: &Program) -> FlowSummary {
+    let mut flow = FlowSummary::falls_through();
+    for statement in program.statements() {
+        if !flow.falls_through {
+            break;
+        }
+        let statement = statement_flow(statement);
+        flow.falls_through = statement.falls_through;
+        flow.returns |= statement.returns;
+        flow.breaks |= statement.breaks;
+        flow.continues |= statement.continues;
+    }
+    flow
+}
+
+pub(super) fn statement_flow(statement: &Statement) -> FlowSummary {
     match statement {
-        Statement::Return(_) => true,
-        Statement::Block { body } => program_has_return(body),
+        Statement::Return(_) => FlowSummary::returned(),
+        Statement::Break => FlowSummary::broke(),
+        Statement::Continue => FlowSummary::continued(),
+        Statement::TryResult(_) => FlowSummary::try_result(),
+        Statement::Block { body } => program_flow(body),
         Statement::If {
             then_branch,
             else_branch,
             ..
-        } => {
-            program_has_return(then_branch) || else_branch.as_ref().is_some_and(program_has_return)
+        } => FlowSummary::alternatives(
+            program_flow(then_branch),
+            else_branch
+                .as_ref()
+                .map_or_else(FlowSummary::falls_through, program_flow),
+        ),
+        Statement::While { body, .. } | Statement::For { body, .. } => {
+            let body = program_flow(body);
+            FlowSummary {
+                falls_through: true,
+                returns: body.returns,
+                breaks: false,
+                continues: false,
+            }
         }
-        Statement::While { body, .. } | Statement::For { body, .. } => program_has_return(body),
         Statement::Function { .. }
         | Statement::ExternalFunction { .. }
         | Statement::Use { .. }
@@ -33,16 +126,13 @@ pub(super) fn statement_has_return(statement: &Statement) -> bool {
         | Statement::Expr(_)
         | Statement::TryCommand(_)
         | Statement::TryCommandResult(_)
-        | Statement::TryResult(_)
         | Statement::TryPipeline { .. }
         | Statement::TryPipelineResult { .. }
         | Statement::Command(_)
         | Statement::Redirect { .. }
         | Statement::Require { .. }
         | Statement::RequireOneOf { .. }
-        | Statement::Break
-        | Statement::Continue
-        | Statement::Raw(_) => false,
+        | Statement::Raw(_) => FlowSummary::falls_through(),
     }
 }
 

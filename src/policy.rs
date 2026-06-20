@@ -122,6 +122,16 @@ impl ExecutionPolicy {
                         ),
                     ));
                 }
+                if let Some(root) = write_roots.iter().find(|root| program.starts_with(root)) {
+                    return Err(CompileError::new(
+                        0,
+                        format!(
+                            "command `{group_name}.{command_name}` program {} is inside writable filesystem root {}; writable command programs could be replaced before execution",
+                            program.display(),
+                            root.display(),
+                        ),
+                    ));
+                }
                 let mut read_args = command.read_args;
                 read_args.sort_unstable();
                 read_args.dedup();

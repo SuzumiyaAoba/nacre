@@ -151,6 +151,37 @@ const matched = match label { "ok" => "matched", _ => "fallback" }
 }
 
 #[test]
+fn generated_bash_preserves_definite_and_implicit_returns() {
+    let output = run_source(
+        r#"
+fn choose(flag: Bool): String {
+if flag {
+return "explicit"
+}
+"implicit"
+}
+
+fn classify(flag: Bool): String {
+if flag {
+return "yes"
+} else {
+return "no"
+}
+}
+
+const explicit = choose(true)
+const implicit = choose(false)
+const yes = classify(true)
+const no = classify(false)
+"#,
+        "printf '%s|%s|%s|%s\\n' \"$explicit\" \"$implicit\" \"$yes\" \"$no\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "explicit|implicit|yes|no\n");
+}
+
+#[test]
 fn generated_bash_runs_functions_generics_traits_and_newtypes() {
     let output = run_source(
         r#"

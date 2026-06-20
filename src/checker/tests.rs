@@ -257,7 +257,34 @@ const _ = "discarded"
             ("const x = 1\nconst y = x()", 2, "not callable"),
             ("const x = missingFn()", 1, "undefined function"),
             ("fn greet(name: String): String {\nconst value = name\n}", 1, "must return String"),
+            (
+                "fn choose(flag: Bool): String {\nif flag {\nreturn \"yes\"\n}\n}",
+                1,
+                "must return String",
+            ),
             ("return 1", 1, "return is only valid inside a function"),
+            ("break", 1, "`break` is only valid inside a loop"),
+            ("continue", 1, "`continue` is only valid inside a loop"),
+            (
+                "fn stop(): Unit {\nbreak\n}",
+                1,
+                "`break` is only valid inside a loop",
+            ),
+            (
+                "fn stop(): Unit {\ncontinue\n}",
+                1,
+                "`continue` is only valid inside a loop",
+            ),
+            (
+                "fn greet(): String {\nreturn \"hello\"\nconst unused = \"no\"\n}",
+                1,
+                "unreachable statement",
+            ),
+            (
+                "while true {\nbreak\nconst unused = 1\n}",
+                1,
+                "unreachable statement",
+            ),
             ("fn greet(prefix: String = \"Hello\", name: String): String {\nreturn name\n}", 1, "required function parameters"),
             ("fn greet(name: String = 1): String {\nreturn name\n}", 1, "default for parameter"),
             ("fn greet(name: String): Int {\nreturn name\n}", 1, "return type mismatch"),
@@ -346,7 +373,7 @@ const _ = "discarded"
             Err(error) => error,
             Ok(()) => panic!("expected type error for `{source}`"),
         };
-        assert_eq!(error.line(), line);
+        assert_eq!(error.line(), line, "unexpected error line for `{source}`");
         assert!(error.message().contains(message), "{error}");
     }
 }

@@ -182,6 +182,7 @@ struct TypeChecker {
     reserved_names: Rc<RefCell<HashSet<String>>>,
     captured_bindings: Option<CapturedBindings>,
     capture_params: HashSet<String>,
+    loop_depth: usize,
 }
 
 impl Default for TypeChecker {
@@ -213,14 +214,23 @@ impl TypeChecker {
             reserved_names: Rc::new(RefCell::new(HashSet::new())),
             captured_bindings: None,
             capture_params: HashSet::new(),
+            loop_depth: 0,
         }
     }
 }
 
 impl TypeChecker {
     fn check_program(&mut self, program: &Program) -> Result<(), CompileError> {
+        let mut reachable = true;
         for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
+            if !reachable {
+                return Err(CompileError::new(
+                    *line,
+                    "unreachable statement after control flow exits".to_string(),
+                ));
+            }
             self.check_statement(statement, *line)?;
+            reachable = statement_flow(statement).falls_through;
         }
         Ok(())
     }
@@ -228,9 +238,18 @@ impl TypeChecker {
     fn check_and_lower_program(&mut self, program: &Program) -> Result<Program, CompileError> {
         let mut statements = Vec::new();
         let mut lines = Vec::new();
+        let mut reachable = true;
         for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
             for expanded in self.expand_nested_try_statement(statement) {
-                statements.push(self.check_and_lower_statement(&expanded, *line)?);
+                if !reachable {
+                    return Err(CompileError::new(
+                        *line,
+                        "unreachable statement after control flow exits".to_string(),
+                    ));
+                }
+                let lowered = self.check_and_lower_statement(&expanded, *line)?;
+                reachable = statement_flow(&lowered).falls_through;
+                statements.push(lowered);
                 lines.push(*line);
             }
         }
@@ -931,7 +950,14 @@ impl TypeChecker {
                     self.lower_try_result_value(expr, line)?,
                 ))
             }
-            Statement::Break | Statement::Continue => Ok(statement.clone()),
+            Statement::Break => {
+                self.check_loop_control("break", line)?;
+                Ok(statement.clone())
+            }
+            Statement::Continue => {
+                self.check_loop_control("continue", line)?;
+                Ok(statement.clone())
+            }
             Statement::Return(expr) => {
                 self.check_return(expr, line)?;
                 let expected = self.expected_return.clone().ok_or_else(|| {
@@ -973,6 +999,7 @@ impl TypeChecker {
                 self.check_condition(condition, line)?;
                 let condition = self.lower_expr(condition, line)?;
                 let mut body_checker = self.clone();
+                body_checker.loop_depth += 1;
                 let body = body_checker.check_and_lower_program(body)?;
                 Ok(Statement::While { condition, body })
             }
@@ -993,6 +1020,7 @@ impl TypeChecker {
                 };
                 let iterable = self.lower_expr(iterable, line)?;
                 let mut body_checker = self.clone();
+                body_checker.loop_depth += 1;
                 body_checker.define(name, *element_ty, false, line)?;
                 let body = body_checker.check_and_lower_program(body)?;
                 Ok(Statement::For {
@@ -1133,7 +1161,8 @@ impl TypeChecker {
             | Statement::Require { .. }
             | Statement::RequireOneOf { .. }
             | Statement::Raw(_) => Err(unsafe_execution_error(line)),
-            Statement::Break | Statement::Continue => Ok(()),
+            Statement::Break => self.check_loop_control("break", line),
+            Statement::Continue => self.check_loop_control("continue", line),
             Statement::Return(expr) => self.check_return(expr, line),
             Statement::Block { body } => {
                 let mut body_checker = self.clone();
@@ -1178,6 +1207,7 @@ impl TypeChecker {
     ) -> Result<(), CompileError> {
         self.check_condition(condition, line)?;
         let mut body_checker = self.clone();
+        body_checker.loop_depth += 1;
         body_checker.check_program(body)
     }
 
@@ -1200,6 +1230,7 @@ impl TypeChecker {
         };
 
         let mut body_checker = self.clone();
+        body_checker.loop_depth += 1;
         body_checker.define(name, *element_ty, false, line)?;
         body_checker.check_program(body)
     }
@@ -1333,6 +1364,7 @@ impl TypeChecker {
 
         let mut body_checker = self.clone();
         body_checker.expected_return = Some(resolved_return.clone());
+        body_checker.loop_depth = 0;
         for param in resolved_params {
             body_checker.define(&param.name, param.ty, false, line)?;
         }
@@ -1453,6 +1485,7 @@ impl TypeChecker {
         let resolved_return = self.resolve_type_with_generics(return_type, &generic_names, line)?;
         let mut body_checker = self.clone();
         body_checker.expected_return = Some(resolved_return.clone());
+        body_checker.loop_depth = 0;
         for param in params {
             let ty = self.resolve_type_with_generics(&param.ty, &generic_names, line)?;
             body_checker.define(&param.name, ty, false, line)?;
@@ -1540,7 +1573,7 @@ impl TypeChecker {
         expected: &Type,
         line: usize,
     ) -> Result<bool, CompileError> {
-        if program_has_return(program) {
+        if program_flow(program).always_returns() {
             return Ok(true);
         }
         let Some(statement) = program.statements().last() else {
@@ -1602,7 +1635,7 @@ impl TypeChecker {
         if expected == &Type::Unit {
             return Ok(program);
         }
-        if program_has_return(&program) {
+        if program_flow(&program).always_returns() {
             return Ok(program);
         }
         let mut statements = program.statements().to_vec();
@@ -1640,6 +1673,17 @@ impl TypeChecker {
             Err(CompileError::new(
                 line,
                 format!("condition must be Bool, found {}", ty.name()),
+            ))
+        }
+    }
+
+    fn check_loop_control(&self, keyword: &str, line: usize) -> Result<(), CompileError> {
+        if self.loop_depth > 0 {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!("`{keyword}` is only valid inside a loop"),
             ))
         }
     }
@@ -2407,6 +2451,7 @@ impl TypeChecker {
     ) -> Result<(Self, CapturedBindings), CompileError> {
         let mut checker = self.clone();
         checker.expected_return = None;
+        checker.loop_depth = 0;
         let captured_bindings = Rc::new(RefCell::new(HashSet::new()));
         checker.captured_bindings = Some(captured_bindings.clone());
         checker.capture_params = params.iter().cloned().collect();

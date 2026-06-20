@@ -74,9 +74,14 @@ Policy loading rejects:
 - Unknown fields.
 - Invalid group or command identifiers.
 - Missing or non-file executables.
+- Command executables located inside an allowed write root.
 - Missing filesystem roots.
 - Overlapping read and write argument positions.
 - Paths that cannot be canonicalized.
+
+Keeping command executables outside write roots is enforced because otherwise
+source code could replace an approved executable and invoke the replacement
+with the executable's authority.
 
 ## Trust Boundary
 
@@ -97,5 +102,5 @@ time-of-check/time-of-use races against a concurrently malicious process.
 - Keep policies narrow and under human review.
 - Prefer a dedicated wrapper script over granting a general-purpose shell.
 - Separate read-only and write-capable commands into clear groups.
-- Pin or control reviewed executables outside source-writable directories.
+- Pin or control reviewed executables outside every configured write root.
 - Test denial paths as well as successful execution.
