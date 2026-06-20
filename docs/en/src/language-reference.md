@@ -227,11 +227,18 @@ the execution policy.
 ```nacre
 const version = run.inspect.version()
 run.output.echo("version: ${version}")
+
+const inspected: CommandOutput = run.result.inspect.version()
+const status: ExitCode = inspected.status
+const stderr: String = inspected.stderr
 ```
 
 The name must have the static form `run.<group>.<command>`. The compiler
 resolves it through an [Execution Policy](security-policy.md). Commands return
-captured standard output as `String`.
+captured standard output as `String`. Use `run.result.<group>.<command>` when
+failure should be handled as data. That form returns a `CommandOutput` record
+with `stdout: String`, `stderr: String`, `status: ExitCode`, and
+`success: Bool`.
 
 ## Operators
 

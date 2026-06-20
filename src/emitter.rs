@@ -18,6 +18,30 @@ use crate::lowering::lower_method_calls;
 use crate::policy::ExecutionPolicy;
 use crate::{BindingPattern, ClosureCapture, Expr, Param, Program, Statement, Type};
 
+#[derive(Clone, Copy)]
+struct AllowedCommandParts<'a> {
+    program: Option<&'a str>,
+    args: &'a [Expr],
+    read_args: &'a [usize],
+    write_args: &'a [usize],
+}
+
+impl<'a> AllowedCommandParts<'a> {
+    fn new(
+        program: Option<&'a str>,
+        args: &'a [Expr],
+        read_args: &'a [usize],
+        write_args: &'a [usize],
+    ) -> Self {
+        Self {
+            program,
+            args,
+            read_args,
+            write_args,
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn transpile(program: &Program) -> String {
     transpile_with_policy(program, &ExecutionPolicy::deny_all())
@@ -138,11 +162,19 @@ fn emit_expr_statement(out: &mut String, expr: &Expr) {
         Expr::AllowedCommand {
             program,
             args,
+            result,
             read_args,
             write_args,
             ..
         } => {
-            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            if *result {
+                emit_allowed_command_result_discard(
+                    out,
+                    AllowedCommandParts::new(program.as_deref(), args, read_args, write_args),
+                );
+            } else {
+                emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            }
             out.push('\n');
         }
         Expr::Call { name, args } => {
@@ -1076,23 +1108,34 @@ fn emit_binding(out: &mut String, name: &str, expr: &Expr, readonly: bool, local
         Expr::AllowedCommand {
             program,
             args,
+            result,
             read_args,
             write_args,
             ..
         } => {
-            if local {
-                out.push_str("local ");
+            if *result {
+                emit_allowed_command_result_binding(
+                    out,
+                    name,
+                    AllowedCommandParts::new(program.as_deref(), args, read_args, write_args),
+                    readonly,
+                    local,
+                );
+            } else {
+                if local {
+                    out.push_str("local ");
+                    out.push_str(name);
+                    out.push('\n');
+                }
                 out.push_str(name);
-                out.push('\n');
-            }
-            out.push_str(name);
-            out.push('=');
-            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, true);
-            out.push_str(" || exit $?\n");
-            if readonly && !local {
-                out.push_str("readonly ");
-                out.push_str(name);
-                out.push('\n');
+                out.push('=');
+                emit_allowed_command(out, program.as_deref(), args, read_args, write_args, true);
+                out.push_str(" || exit $?\n");
+                if readonly && !local {
+                    out.push_str("readonly ");
+                    out.push_str(name);
+                    out.push('\n');
+                }
             }
         }
         Expr::Command { command, checked } if *checked => {
@@ -1349,6 +1392,20 @@ fn emit_assignment(out: &mut String, name: &str, expr: &Expr) {
         Expr::Call { name: call, args } if call == "str.split" => {
             emit_call_output_array_binding(out, name, call, args, false, false)
         }
+        Expr::AllowedCommand {
+            program,
+            args,
+            result,
+            read_args,
+            write_args,
+            ..
+        } if *result => emit_allowed_command_result_binding(
+            out,
+            name,
+            AllowedCommandParts::new(program.as_deref(), args, read_args, write_args),
+            false,
+            false,
+        ),
         Expr::AsyncCommand(command) => emit_async_binding(out, name, command, false, false),
         Expr::Await(future) => emit_await_binding(out, name, future, false, false),
         Expr::CommandResult { command } => {
@@ -1561,11 +1618,19 @@ fn emit_discard_expr(out: &mut String, expr: &Expr) {
         Expr::AllowedCommand {
             program,
             args,
+            result,
             read_args,
             write_args,
             ..
         } => {
-            emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            if *result {
+                emit_allowed_command_result_discard(
+                    out,
+                    AllowedCommandParts::new(program.as_deref(), args, read_args, write_args),
+                );
+            } else {
+                emit_allowed_command(out, program.as_deref(), args, read_args, write_args, false);
+            }
             out.push('\n');
         }
         Expr::Command { command, checked } => {
@@ -2294,6 +2359,120 @@ fn emit_allowed_command(
     }
     if capture {
         out.push_str(")\"");
+    }
+}
+
+fn emit_allowed_command_result_binding(
+    out: &mut String,
+    name: &str,
+    command: AllowedCommandParts<'_>,
+    readonly: bool,
+    local: bool,
+) {
+    if local {
+        out.push_str("local ");
+        out.push_str(name);
+        out.push_str("_stdout ");
+        out.push_str(name);
+        out.push_str("_stderr ");
+        out.push_str(name);
+        out.push_str("_status ");
+        out.push_str(name);
+        out.push_str("_success\n");
+    }
+    let Some(program) = command.program else {
+        out.push_str(name);
+        out.push_str("_stdout=''\n");
+        out.push_str(name);
+        out.push_str("_stderr='nacre: unresolved command policy'\n");
+        out.push_str(name);
+        out.push_str("_status=126\n");
+        out.push_str(name);
+        out.push_str("_success=false\n");
+        return;
+    };
+
+    emit_allowed_command_args(out, command.args, command.read_args, command.write_args);
+    out.push_str("__nacre_result_stderr_file=\"$(mktemp)\"\n");
+    out.push_str("if ");
+    out.push_str(name);
+    out.push_str("_stdout=\"$({ ");
+    emit_allowed_command_invocation(out, program, command.args.len());
+    out.push_str("; } 2>\"$__nacre_result_stderr_file\")\"; then\n");
+    out.push_str(name);
+    out.push_str("_status=0\n");
+    out.push_str(name);
+    out.push_str("_stderr=''\n");
+    out.push_str(name);
+    out.push_str("_success=true\n");
+    out.push_str("else\n__nacre_result_status=$?\n");
+    out.push_str(name);
+    out.push_str("_status=\"$__nacre_result_status\"\n");
+    out.push_str(name);
+    out.push_str("_stderr=\"$(cat \"$__nacre_result_stderr_file\")\"\n");
+    out.push_str(name);
+    out.push_str("_success=false\nfi\n");
+    out.push_str("rm -f \"$__nacre_result_stderr_file\"\n");
+    if readonly && !local {
+        out.push_str("readonly ");
+        out.push_str(name);
+        out.push_str("_stdout ");
+        out.push_str(name);
+        out.push_str("_stderr ");
+        out.push_str(name);
+        out.push_str("_status ");
+        out.push_str(name);
+        out.push_str("_success\n");
+    }
+}
+
+fn emit_allowed_command_result_discard(out: &mut String, command: AllowedCommandParts<'_>) {
+    let Some(program) = command.program else {
+        out.push_str("printf 'nacre: unresolved command policy\\n' >&2; exit 126");
+        return;
+    };
+    emit_allowed_command_args(out, command.args, command.read_args, command.write_args);
+    out.push_str("__nacre_result_stderr_file=\"$(mktemp)\"; { ");
+    emit_allowed_command_invocation(out, program, command.args.len());
+    out.push_str("; } >/dev/null 2>\"$__nacre_result_stderr_file\" || true; ");
+    out.push_str("rm -f \"$__nacre_result_stderr_file\"");
+}
+
+fn emit_allowed_command_args(
+    out: &mut String,
+    args: &[Expr],
+    read_args: &[usize],
+    write_args: &[usize],
+) {
+    for (index, arg) in args.iter().enumerate() {
+        out.push_str("__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push('=');
+        emit_expr(out, arg);
+        out.push_str("; ");
+    }
+    for index in read_args {
+        out.push_str("__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("=\"$(__nacre_checked_path read \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\")\" || exit $?; ");
+    }
+    for index in write_args {
+        out.push_str("__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("=\"$(__nacre_checked_path write \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\")\" || exit $?; ");
+    }
+}
+
+fn emit_allowed_command_invocation(out: &mut String, program: &str, arg_count: usize) {
+    emit_bash_string(out, program);
+    for index in 0..arg_count {
+        out.push_str(" \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push('"');
     }
 }
 

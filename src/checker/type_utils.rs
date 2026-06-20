@@ -134,6 +134,15 @@ pub(super) fn command_result_type() -> Type {
     Type::Applied("Result".to_string(), vec![Type::String, cmd_error_type()])
 }
 
+pub(super) fn command_output_type() -> Type {
+    Type::Record(vec![
+        ("stdout".to_string(), Type::String),
+        ("stderr".to_string(), Type::String),
+        ("status".to_string(), Type::ExitCode),
+        ("success".to_string(), Type::Bool),
+    ])
+}
+
 pub(super) fn cmd_error_type() -> Type {
     Type::Record(vec![
         ("code".to_string(), Type::ExitCode),

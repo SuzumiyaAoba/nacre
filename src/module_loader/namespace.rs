@@ -800,6 +800,7 @@ fn namespace_expr(
             group,
             command,
             args,
+            result,
             program,
             read_args,
             write_args,
@@ -810,6 +811,7 @@ fn namespace_expr(
                 .iter()
                 .map(|arg| namespace_expr(arg, context, local_names, local_type_names))
                 .collect(),
+            result: *result,
             program: program.clone(),
             read_args: read_args.clone(),
             write_args: write_args.clone(),

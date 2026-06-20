@@ -195,6 +195,7 @@ impl TypeChecker {
     fn with_policy(policy: ExecutionPolicy) -> Self {
         let mut types = HashMap::new();
         types.insert("CmdError".to_string(), cmd_error_type());
+        types.insert("CommandOutput".to_string(), command_output_type());
         Self {
             policy,
             bindings: HashMap::new(),
@@ -2641,6 +2642,7 @@ impl TypeChecker {
                 group,
                 command,
                 args,
+                result,
                 ..
             } => {
                 let policy = self.policy.command(group, command).ok_or_else(|| {
@@ -2656,6 +2658,7 @@ impl TypeChecker {
                         .iter()
                         .map(|arg| self.lower_expr(arg, line))
                         .collect::<Result<Vec<_>, _>>()?,
+                    result: *result,
                     program: Some(policy.program().to_string_lossy().into_owned()),
                     read_args: policy.read_args().to_vec(),
                     write_args: policy.write_args().to_vec(),
@@ -3695,8 +3698,9 @@ impl TypeChecker {
                 group,
                 command,
                 args,
+                result,
                 ..
-            } => self.check_allowed_command(group, command, args, line),
+            } => self.check_allowed_command(group, command, args, *result, line),
             Expr::HasCommand(_) => Err(CompileError::new(
                 line,
                 "`hasCommand` is disabled; declare executables in the external policy and call them through `run.<group>.<command>(...)`".to_string(),
@@ -4346,6 +4350,7 @@ impl TypeChecker {
         group: &str,
         command: &str,
         args: &[Expr],
+        result: bool,
         line: usize,
     ) -> Result<Type, CompileError> {
         let Some(policy) = self.policy.command(group, command) else {
@@ -4385,7 +4390,11 @@ impl TypeChecker {
                 ));
             }
         }
-        Ok(Type::String)
+        if result {
+            Ok(command_output_type())
+        } else {
+            Ok(Type::String)
+        }
     }
 
     fn require_read_access(&self, operation: &str, line: usize) -> Result<(), CompileError> {

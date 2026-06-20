@@ -783,11 +783,12 @@ fn ident_name(value: &Expr) -> Option<&str> {
 }
 
 fn call_expr(name: String, mut args: Vec<Expr>) -> Expr {
-    if let Some((group, command)) = allowed_command_name(&name) {
+    if let Some((group, command, result)) = allowed_command_name(&name) {
         return Expr::AllowedCommand {
             group,
             command,
             args,
+            result,
             program: None,
             read_args: Vec::new(),
             write_args: Vec::new(),
@@ -857,17 +858,22 @@ fn call_expr(name: String, mut args: Vec<Expr>) -> Expr {
     }
 }
 
-fn allowed_command_name(name: &str) -> Option<(String, String)> {
+fn allowed_command_name(name: &str) -> Option<(String, String, bool)> {
     let mut parts = name.split('.');
     if parts.next()? != "run" {
         return None;
     }
-    let group = parts.next()?;
+    let first = parts.next()?;
+    let (group, result) = if first == "result" {
+        (parts.next()?, true)
+    } else {
+        (first, false)
+    };
     let command = parts.next()?;
     if parts.next().is_some() {
         return None;
     }
-    Some((group.to_string(), command.to_string()))
+    Some((group.to_string(), command.to_string(), result))
 }
 
 fn named_or_value<T>(

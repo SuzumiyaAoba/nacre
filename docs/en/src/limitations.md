@@ -7,8 +7,9 @@ syntax.
 
 - Nacre targets Bash 4 or newer.
 - Approved commands return captured standard output as `String`.
-- Structured exit status and standard-error values are not exposed by ordinary
-  approved command calls.
+- Ordinary approved command calls do not return structured exit status and
+  standard-error values. Use `run.result.<group>.<command>` when those values
+  are needed.
 - Arbitrary shell, pipelines, redirects, background execution, and dynamic
   executable selection are intentionally unavailable.
 

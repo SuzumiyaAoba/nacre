@@ -214,6 +214,7 @@ pub enum Expr {
         group: String,
         command: String,
         args: Vec<Expr>,
+        result: bool,
         program: Option<String>,
         read_args: Vec<usize>,
         write_args: Vec<usize>,

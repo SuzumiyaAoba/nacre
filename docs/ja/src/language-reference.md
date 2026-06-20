@@ -229,11 +229,18 @@ const arguments: [String] = args
 ```nacre
 const version = run.inspect.version()
 run.output.echo("version: ${version}")
+
+const inspected: CommandOutput = run.result.inspect.version()
+const status: ExitCode = inspected.status
+const stderr: String = inspected.stderr
 ```
 
 名前は静的な `run.<group>.<command>` 形式でなければなりません。コンパイラは
 [実行ポリシー](security-policy.md)を通して名前を解決します。コマンドは
-標準出力を `String` として返します。
+標準出力を `String` として返します。失敗を値として扱いたい場合は
+`run.result.<group>.<command>` を使います。この形式は
+`CommandOutput` レコードを返し、`stdout: String`、`stderr: String`、
+`status: ExitCode`、`success: Bool` を読み取れます。
 
 ## 演算子
 

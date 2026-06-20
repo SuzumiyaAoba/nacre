@@ -170,6 +170,48 @@ fn filesystem_access_requires_an_allowed_root() {
 }
 
 #[test]
+fn approved_command_result_captures_stdout_stderr_and_status() {
+    let dir = unique_dir();
+    fs::create_dir_all(&dir).unwrap();
+    let command = dir.join("probe");
+    write_executable(
+        &command,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'out:%s\\n' \"$1\"\nprintf 'err:%s\\n' \"$1\" >&2\nexit 7\n",
+    );
+    let policy_path = dir.join("policy.toml");
+    fs::write(
+        &policy_path,
+        "[command_groups.inspect.commands.probe]\nprogram = \"probe\"\nargs = 1\n",
+    )
+    .unwrap();
+    let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
+    let mut bash = compile_source_with_policy(
+        r#"
+const result: CommandOutput = run.result.inspect.probe("value")
+const stdout = result.stdout
+const stderr = result.stderr
+const status = result.status
+const success = result.success
+"#,
+        &policy,
+    )
+    .unwrap();
+    bash.push_str("\nprintf '%s|%s|%s|%s\\n' \"$stdout\" \"$stderr\" \"$status\" \"$success\"\n");
+
+    let output = run_bash(&bash);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "out:value|err:value|7|false\n"
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn approved_command_arguments_are_not_evaluated_as_shell() {
     let dir = unique_dir();
     fs::create_dir_all(&dir).unwrap();

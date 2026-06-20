@@ -357,6 +357,7 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
             group,
             command,
             args,
+            result,
             program,
             read_args,
             write_args,
@@ -367,6 +368,7 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
                 .iter()
                 .map(|arg| mangle_local_expr(arg, local_names))
                 .collect(),
+            result: *result,
             program: program.clone(),
             read_args: read_args.clone(),
             write_args: write_args.clone(),
