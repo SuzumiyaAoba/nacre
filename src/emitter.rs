@@ -2273,14 +2273,18 @@ fn emit_allowed_command(
         out.push_str("; ");
     }
     for index in read_args {
-        out.push_str("__nacre_assert_path_in_roots read \"$__nacre_run_arg_");
+        out.push_str("__nacre_run_arg_");
         out.push_str(&index.to_string());
-        out.push_str("\" || exit $?; ");
+        out.push_str("=\"$(__nacre_checked_path read \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\")\" || exit $?; ");
     }
     for index in write_args {
-        out.push_str("__nacre_assert_path_in_roots write \"$__nacre_run_arg_");
+        out.push_str("__nacre_run_arg_");
         out.push_str(&index.to_string());
-        out.push_str("\" || exit $?; ");
+        out.push_str("=\"$(__nacre_checked_path write \"$__nacre_run_arg_");
+        out.push_str(&index.to_string());
+        out.push_str("\")\" || exit $?; ");
     }
     emit_bash_string(out, program);
     for index in 0..args.len() {
@@ -2668,13 +2672,13 @@ fn emit_inline_declaration_copy(out: &mut String, source: &str, target: &str, ty
 fn emit_path_exists(out: &mut String, path: &Expr) {
     out.push_str("$(__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; if [ -e \"$__nacre_guarded_path\" ]; then printf true; else printf false; fi)");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?; if [ -e \"$__nacre_guarded_path\" ]; then printf true; else printf false; fi)");
 }
 
 fn emit_fs_test(out: &mut String, test: &str, path: &Expr) {
     out.push_str("$(__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; if [ ");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?; if [ ");
     out.push_str(test);
     out.push_str(" \"$__nacre_guarded_path\" ]; then printf true; else printf false; fi)");
 }
@@ -2682,7 +2686,7 @@ fn emit_fs_test(out: &mut String, test: &str, path: &Expr) {
 fn emit_fs_size(out: &mut String, path: &Expr) {
     out.push_str("$(__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; wc -c < \"$__nacre_guarded_path\" | tr -d '[:space:]')");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?; wc -c < \"$__nacre_guarded_path\" | tr -d '[:space:]')");
 }
 
 fn emit_fs_read_lines_binding(
@@ -2700,7 +2704,7 @@ fn emit_fs_read_lines_binding(
     out.push_str("__nacre_guarded_path=");
     emit_expr(out, path);
     out.push_str(
-        "\n__nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?\nmapfile -t ",
+        "\n__nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?\nmapfile -t ",
     );
     out.push_str(binding);
     out.push_str(" < \"$__nacre_guarded_path\"\n");
@@ -2714,7 +2718,7 @@ fn emit_fs_read_lines_binding(
 fn emit_fs_read_lines_value(out: &mut String, path: &Expr) {
     out.push_str("\"$(__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; printf '%s' \"$(<\"$__nacre_guarded_path\")\")\"");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?; printf '%s' \"$(<\"$__nacre_guarded_path\")\")\"");
 }
 
 fn emit_fs_list_binding(out: &mut String, binding: &str, path: &Expr, readonly: bool, local: bool) {
@@ -2744,7 +2748,7 @@ fn emit_fs_list_value(out: &mut String, path: &Expr) {
 fn emit_fs_list_command(out: &mut String, path: &Expr) {
     out.push_str("__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_path\" || exit $?; find \"$__nacre_guarded_path\" -mindepth 1 -maxdepth 1 -print | sort");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path read \"$__nacre_guarded_path\")\" || exit $?; find \"$__nacre_guarded_path\" -mindepth 1 -maxdepth 1 -print | sort");
 }
 
 fn emit_fs_write_lines_statement(out: &mut String, path: &Expr, lines: &Expr) {
@@ -2772,11 +2776,11 @@ fn emit_fs_append_lines_expr(out: &mut String, path: &Expr, lines: &Expr) {
 fn emit_fs_write_lines_command(out: &mut String, path: &Expr, lines: &Expr) {
     out.push_str("__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots write \"$__nacre_guarded_path\" || exit $?; ");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path write \"$__nacre_guarded_path\")\" || exit $?; ");
     if let Expr::FsReadLines { path: source } = lines {
         out.push_str("__nacre_guarded_source=");
         emit_expr(out, source);
-        out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_source\" || exit $?; cat \"$__nacre_guarded_source\" > \"$__nacre_guarded_path\"");
+        out.push_str("; __nacre_guarded_source=\"$(__nacre_checked_path read \"$__nacre_guarded_source\")\" || exit $?; cat \"$__nacre_guarded_source\" > \"$__nacre_guarded_path\"");
         return;
     }
     out.push_str("printf '%s\\n'");
@@ -2787,11 +2791,11 @@ fn emit_fs_write_lines_command(out: &mut String, path: &Expr, lines: &Expr) {
 fn emit_fs_append_lines_command(out: &mut String, path: &Expr, lines: &Expr) {
     out.push_str("__nacre_guarded_path=");
     emit_expr(out, path);
-    out.push_str("; __nacre_assert_path_in_roots write \"$__nacre_guarded_path\" || exit $?; ");
+    out.push_str("; __nacre_guarded_path=\"$(__nacre_checked_path write \"$__nacre_guarded_path\")\" || exit $?; ");
     if let Expr::FsReadLines { path: source } = lines {
         out.push_str("__nacre_guarded_source=");
         emit_expr(out, source);
-        out.push_str("; __nacre_assert_path_in_roots read \"$__nacre_guarded_source\" || exit $?; cat \"$__nacre_guarded_source\" >> \"$__nacre_guarded_path\"");
+        out.push_str("; __nacre_guarded_source=\"$(__nacre_checked_path read \"$__nacre_guarded_source\")\" || exit $?; cat \"$__nacre_guarded_source\" >> \"$__nacre_guarded_path\"");
         return;
     }
     out.push_str("printf '%s\\n'");

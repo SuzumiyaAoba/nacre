@@ -205,9 +205,10 @@ const file: Path = "/tmp/archive.tar.gz"
 const extension = path.extname(file)
 ```
 
-読み込んだ宣言には名前空間が付きます。同梱モジュールには `std.cli`、
-`std.fs`、`std.io`、`std.json`、`std.log`、`std.path`、
-`std.process`、`std.str`、`std.test` があります。
+読み込んだ宣言には名前空間が付きます。`std` 以外のモジュールは、読み込むファイルからの
+相対パスだけで解決されます。同梱モジュールには `std.cli`、`std.fs`、`std.io`、
+`std.json`、`std.log`、`std.path`、`std.process`、`std.str`、`std.test` が
+あります。
 
 ## 環境変数と引数
 
@@ -218,7 +219,10 @@ const arguments: [String] = args
 ```
 
 環境変数とコマンドライン引数は、信頼できないデータとして扱ってください。
-許可されたコマンドへ渡す場合も、個別の引数として保持されます。
+許可されたコマンドへ渡す場合も、個別の引数として保持されます。環境変数名は
+実行ポリシーに列挙する必要があり、`process.env(...)` は静的な文字列リテラルの
+名前だけを受け付けます。コマンドライン引数には、実行ポリシーの
+`[process] args = true` が必要です。
 
 ## 許可されたコマンド
 
@@ -253,6 +257,6 @@ run.output.echo("version: ${version}")
 - 生の Bash ブロック
 - シェルのパイプラインとリダイレクト
 - バックグラウンド、非同期、spawn 形式のシェルコマンド
-- `require(...)` と `requireOneOf(...)`
+- `hasCommand(...)`、`require(...)`、`requireOneOf(...)`
 
 代わりに、用途を限定したレビュー済みの実行ファイルをポリシーへ追加してください。

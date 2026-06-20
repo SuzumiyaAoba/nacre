@@ -751,6 +751,7 @@ impl TypeChecker {
         statement: &Statement,
         line: usize,
     ) -> Result<Statement, CompileError> {
+        self.require_process_args_access_in_statement(statement, line)?;
         match statement {
             Statement::Use { .. } => Ok(statement.clone()),
             Statement::ExternalFunction {
@@ -1033,6 +1034,7 @@ impl TypeChecker {
     }
 
     fn check_statement(&mut self, statement: &Statement, line: usize) -> Result<(), CompileError> {
+        self.require_process_args_access_in_statement(statement, line)?;
         match statement {
             Statement::Use { .. } => Ok(()),
             Statement::Trait {
@@ -2076,6 +2078,12 @@ impl TypeChecker {
     ) -> Result<(), CompileError> {
         if name == "_" {
             return Ok(());
+        }
+        if name == "args" {
+            return Err(CompileError::new(
+                line,
+                "`args` is reserved for process arguments".to_string(),
+            ));
         }
         if self.bindings.contains_key(name) {
             return Err(CompileError::new(
@@ -3689,7 +3697,10 @@ impl TypeChecker {
                 args,
                 ..
             } => self.check_allowed_command(group, command, args, line),
-            Expr::HasCommand(_) => Ok(Type::Bool),
+            Expr::HasCommand(_) => Err(CompileError::new(
+                line,
+                "`hasCommand` is disabled; declare executables in the external policy and call them through `run.<group>.<command>(...)`".to_string(),
+            )),
             Expr::PathExists(path) => {
                 self.require_read_access("pathExists", line)?;
                 self.check_path_exists(path, line)
@@ -4051,7 +4062,11 @@ impl TypeChecker {
             Expr::PathIsAbsoluteValue(value) => self
                 .check_path_transform_value(value, "isAbsolute", line)
                 .map(|_| Type::Bool),
-            Expr::RawString(_) | Expr::Env(_) | Expr::EnvDefault { .. } => Ok(Type::String),
+            Expr::RawString(_) => Ok(Type::String),
+            Expr::Env(name) | Expr::EnvDefault { name, .. } => {
+                self.require_env_access(name, line)?;
+                Ok(Type::String)
+            }
             Expr::Command { .. }
             | Expr::CommandResult { .. }
             | Expr::AsyncCommand(_)
@@ -4339,28 +4354,20 @@ impl TypeChecker {
                 format!("command `{group}.{command}` is not allowed by the execution policy"),
             ));
         };
-        for index in policy.read_args() {
-            if *index >= args.len() {
-                return Err(CompileError::new(
-                    line,
-                    format!(
-                        "policy for command `{group}.{command}` requires read path argument {}",
-                        index + 1
-                    ),
-                ));
-            }
+        if args.len() != policy.args() {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "command `{group}.{command}` expects {} by policy, found {}",
+                    argument_count(policy.args()),
+                    args.len()
+                ),
+            ));
+        }
+        if !policy.read_args().is_empty() {
             self.require_read_access(&format!("command `{group}.{command}`"), line)?;
         }
-        for index in policy.write_args() {
-            if *index >= args.len() {
-                return Err(CompileError::new(
-                    line,
-                    format!(
-                        "policy for command `{group}.{command}` requires write path argument {}",
-                        index + 1
-                    ),
-                ));
-            }
+        if !policy.write_args().is_empty() {
             self.require_write_access(&format!("command `{group}.{command}`"), line)?;
         }
         for arg in args {
@@ -4400,6 +4407,38 @@ impl TypeChecker {
                 line,
                 format!("{operation} requires at least one allowed filesystem write root"),
             ))
+        }
+    }
+
+    fn require_env_access(&self, name: &str, line: usize) -> Result<(), CompileError> {
+        if !is_valid_name(name) {
+            return Err(CompileError::new(
+                line,
+                format!("invalid environment variable name `{name}`"),
+            ));
+        }
+        if self.policy.can_read_env(name) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!("environment variable `{name}` is not allowed by the execution policy"),
+            ))
+        }
+    }
+
+    fn require_process_args_access_in_statement(
+        &self,
+        statement: &Statement,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        if statement_uses_process_args(statement) && !self.policy.can_read_process_args() {
+            Err(CompileError::new(
+                line,
+                "process arguments are not allowed by the execution policy".to_string(),
+            ))
+        } else {
+            Ok(())
         }
     }
 
@@ -4456,18 +4495,26 @@ impl TypeChecker {
     }
 
     fn check_process_env(&self, name: &Expr, line: usize) -> Result<Type, CompileError> {
-        let name_ty = self.check_expr(name, line)?;
-        if matches!(name_ty, Type::String | Type::Path) {
-            Ok(Type::String)
-        } else {
-            Err(CompileError::new(
-                line,
-                format!(
-                    "process.env name must be String or Path, found {}",
-                    name_ty.name()
-                ),
-            ))
-        }
+        let Some(name) = static_env_name(name) else {
+            let name_ty = self.check_expr(name, line)?;
+            return if matches!(name_ty, Type::String | Type::Path) {
+                Err(CompileError::new(
+                    line,
+                    "process.env requires a static string literal environment variable name"
+                        .to_string(),
+                ))
+            } else {
+                Err(CompileError::new(
+                    line,
+                    format!(
+                        "process.env name must be String or Path, found {}",
+                        name_ty.name()
+                    ),
+                ))
+            };
+        };
+        self.require_env_access(name, line)?;
+        Ok(Type::String)
     }
 
     fn check_json_parse(&self, value: &Expr, line: usize) -> Result<Type, CompileError> {
@@ -8043,6 +8090,319 @@ impl TypeChecker {
             }
         }
         Ok(())
+    }
+}
+
+fn static_env_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::String(value) | Expr::RawString(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn statement_uses_process_args(statement: &Statement) -> bool {
+    match statement {
+        Statement::Function { body, .. } => program_uses_process_args(body),
+        Statement::Impl { methods, .. } => methods
+            .iter()
+            .any(|method| program_uses_process_args(&method.body)),
+        Statement::Const { expr, .. }
+        | Statement::Let { expr, .. }
+        | Statement::Destructure { expr, .. }
+        | Statement::Assign { expr, .. }
+        | Statement::Expr(expr)
+        | Statement::TryResult(expr)
+        | Statement::Return(expr) => expr_uses_process_args(expr),
+        Statement::Block { body } | Statement::While { body, .. } | Statement::For { body, .. } => {
+            program_uses_process_args(body)
+        }
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            expr_uses_process_args(condition)
+                || program_uses_process_args(then_branch)
+                || else_branch.as_ref().is_some_and(program_uses_process_args)
+        }
+        _ => false,
+    }
+}
+
+fn program_uses_process_args(program: &Program) -> bool {
+    program.statements().iter().any(statement_uses_process_args)
+}
+
+fn do_step_uses_process_args(step: &DoStep) -> bool {
+    match step {
+        DoStep::Bind { expr, .. } | DoStep::Let { expr, .. } => expr_uses_process_args(expr),
+    }
+}
+
+fn match_arm_uses_process_args(arm: &MatchArm) -> bool {
+    arm.pattern.as_ref().is_some_and(expr_uses_process_args)
+        || arm.guard.as_ref().is_some_and(expr_uses_process_args)
+        || expr_uses_process_args(&arm.expr)
+}
+
+fn expr_uses_process_args(expr: &Expr) -> bool {
+    match expr {
+        Expr::ProcessArgs | Expr::CliParse => true,
+        Expr::Ident(name)
+        | Expr::Value(name)
+        | Expr::Len(name)
+        | Expr::IsEmpty(name)
+        | Expr::ArrayFirst(name)
+        | Expr::ArrayLast(name)
+        | Expr::ArrayReverse(name)
+        | Expr::ArraySort(name)
+        | Expr::ArrayUnique(name)
+        | Expr::ArrayPop { name }
+        | Expr::MapKeys(name)
+        | Expr::MapValues(name)
+        | Expr::StringLen(name)
+        | Expr::StringIsEmpty(name)
+        | Expr::StringTrim(name)
+        | Expr::StringTrimStart(name)
+        | Expr::StringTrimEnd(name)
+        | Expr::StringToUpper(name)
+        | Expr::StringToLower(name)
+        | Expr::PathBasename(name)
+        | Expr::PathDirname(name)
+        | Expr::PathStem(name)
+        | Expr::PathExtname(name)
+        | Expr::PathIsAbsolute(name)
+        | Expr::Field { name, .. } => name == "args",
+        Expr::String(value) => interpolation_mentions_args(value),
+        Expr::Some(value)
+        | Expr::Ok(value)
+        | Expr::Err(value)
+        | Expr::ResultOption(value)
+        | Expr::TryResult(value)
+        | Expr::PathExists(value)
+        | Expr::IndexValue { value, .. }
+        | Expr::ArrayLenValue(value)
+        | Expr::MapLenValue(value)
+        | Expr::ArrayIsEmptyValue(value)
+        | Expr::MapIsEmptyValue(value)
+        | Expr::ArrayFirstValue(value)
+        | Expr::ArrayLastValue(value)
+        | Expr::ArrayReverseValue(value)
+        | Expr::ArraySortValue(value)
+        | Expr::ArrayUniqueValue(value)
+        | Expr::MapKeysValue(value)
+        | Expr::MapValuesValue(value)
+        | Expr::StringLenValue(value)
+        | Expr::StringIsEmptyValue(value)
+        | Expr::StringTrimValue(value)
+        | Expr::StringTrimStartValue(value)
+        | Expr::StringTrimEndValue(value)
+        | Expr::StringToUpperValue(value)
+        | Expr::StringToLowerValue(value)
+        | Expr::PathBasenameValue(value)
+        | Expr::PathDirnameValue(value)
+        | Expr::PathStemValue(value)
+        | Expr::PathExtnameValue(value)
+        | Expr::PathIsAbsoluteValue(value)
+        | Expr::ProcessEnv { name: value }
+        | Expr::FsIsFile { path: value }
+        | Expr::FsIsDir { path: value }
+        | Expr::FsSize { path: value }
+        | Expr::FsReadLines { path: value }
+        | Expr::FsList { path: value }
+        | Expr::JsonParse { value }
+        | Expr::JsonStringifyValue { value }
+        | Expr::MatchGuardResult(value)
+        | Expr::Not(value)
+        | Expr::BitNot(value)
+        | Expr::Cast { expr: value, .. }
+        | Expr::NewtypeCtor { value, .. }
+        | Expr::TupleFieldValue { value, .. }
+        | Expr::FieldValue { value, .. } => expr_uses_process_args(value),
+        Expr::Default { value, fallback }
+        | Expr::DefaultTry { value, fallback }
+        | Expr::OptionOrElseValue { value, fallback }
+        | Expr::OptionOrElseTry { value, fallback }
+        | Expr::ArrayContainsValue {
+            value,
+            item: fallback,
+        }
+        | Expr::ArrayIndexOfValue {
+            value,
+            item: fallback,
+        }
+        | Expr::MapHasValue {
+            value,
+            key: fallback,
+        } => expr_uses_process_args(value) || expr_uses_process_args(fallback),
+        Expr::Index { name, index }
+        | Expr::Slice {
+            name, start: index, ..
+        }
+        | Expr::ArrayTake { name, count: index }
+        | Expr::ArrayDrop { name, count: index }
+        | Expr::Join {
+            name,
+            separator: index,
+        }
+        | Expr::ArrayContains { name, value: index }
+        | Expr::ArrayIndexOf { name, value: index }
+        | Expr::MapHas { name, key: index }
+        | Expr::StringContains {
+            name,
+            needle: index,
+        }
+        | Expr::StringIndexOf {
+            name,
+            needle: index,
+        }
+        | Expr::StringStartsWith {
+            name,
+            prefix: index,
+        }
+        | Expr::StringEndsWith {
+            name,
+            suffix: index,
+        }
+        | Expr::StringRepeat { name, count: index }
+        | Expr::StringSplit {
+            name,
+            separator: index,
+        } => name == "args" || expr_uses_process_args(index),
+        Expr::ArraySliceValue { value, start, end }
+        | Expr::StringSliceValue { value, start, end } => {
+            expr_uses_process_args(value)
+                || expr_uses_process_args(start)
+                || expr_uses_process_args(end)
+        }
+        Expr::StringSlice { name, start, end } => {
+            name == "args" || expr_uses_process_args(start) || expr_uses_process_args(end)
+        }
+        Expr::StringReplace { name, from, to } => {
+            name == "args" || expr_uses_process_args(from) || expr_uses_process_args(to)
+        }
+        Expr::StringReplaceValue { value, from, to } => {
+            expr_uses_process_args(value)
+                || expr_uses_process_args(from)
+                || expr_uses_process_args(to)
+        }
+        Expr::OptionMap { name, mapper }
+        | Expr::OptionFlatMap { name, mapper }
+        | Expr::ResultMap { name, mapper }
+        | Expr::ResultFlatMap { name, mapper }
+        | Expr::ArrayMap { name, mapper } => name == "args" || expr_uses_process_args(mapper),
+        Expr::OptionMapValue { value, mapper }
+        | Expr::OptionFlatMapValue { value, mapper }
+        | Expr::ResultMapValue { value, mapper }
+        | Expr::ResultFlatMapValue { value, mapper }
+        | Expr::ArrayMapValue { value, mapper } => {
+            expr_uses_process_args(value) || expr_uses_process_args(mapper)
+        }
+        Expr::OptionAp { name, value }
+        | Expr::ResultAp { name, value }
+        | Expr::OptionOrElse {
+            name,
+            fallback: value,
+        }
+        | Expr::ArrayPush { name, value } => name == "args" || expr_uses_process_args(value),
+        Expr::OptionApValue { function, value } | Expr::ResultApValue { function, value } => {
+            expr_uses_process_args(function) || expr_uses_process_args(value)
+        }
+        Expr::ArrayTakeValue { value, count }
+        | Expr::ArrayDropValue { value, count }
+        | Expr::StringRepeatValue { value, count } => {
+            expr_uses_process_args(value) || expr_uses_process_args(count)
+        }
+        Expr::JoinValue { value, separator } | Expr::StringSplitValue { value, separator } => {
+            expr_uses_process_args(value) || expr_uses_process_args(separator)
+        }
+        Expr::MapSet { name, key, value } => {
+            name == "args" || expr_uses_process_args(key) || expr_uses_process_args(value)
+        }
+        Expr::MapRemove { name, key } => name == "args" || expr_uses_process_args(key),
+        Expr::StringContainsValue { value, needle }
+        | Expr::StringIndexOfValue { value, needle }
+        | Expr::StringStartsWithValue {
+            value,
+            prefix: needle,
+        }
+        | Expr::StringEndsWithValue {
+            value,
+            suffix: needle,
+        } => expr_uses_process_args(value) || expr_uses_process_args(needle),
+        Expr::FsWriteLines { path, lines } | Expr::FsAppendLines { path, lines } => {
+            expr_uses_process_args(path) || expr_uses_process_args(lines)
+        }
+        Expr::LetIn { value, body, .. } => {
+            expr_uses_process_args(value) || expr_uses_process_args(body)
+        }
+        Expr::IfElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            expr_uses_process_args(condition)
+                || expr_uses_process_args(then_expr)
+                || expr_uses_process_args(else_expr)
+        }
+        Expr::Binary { left, right, .. } => {
+            expr_uses_process_args(left) || expr_uses_process_args(right)
+        }
+        Expr::Array(values)
+        | Expr::Tuple(values)
+        | Expr::Variant { args: values, .. }
+        | Expr::Call { args: values, .. }
+        | Expr::AllowedCommand { args: values, .. } => values.iter().any(expr_uses_process_args),
+        Expr::Map(entries) => entries
+            .iter()
+            .any(|(key, value)| expr_uses_process_args(key) || expr_uses_process_args(value)),
+        Expr::Record(fields) => fields
+            .iter()
+            .any(|(_, value)| expr_uses_process_args(value)),
+        Expr::RecordPattern(fields) => fields
+            .iter()
+            .any(|(_, value)| value.as_ref().is_some_and(expr_uses_process_args)),
+        Expr::Lambda { body, .. } => expr_uses_process_args(body),
+        Expr::Do { steps, result } => {
+            steps.iter().any(do_step_uses_process_args) || expr_uses_process_args(result)
+        }
+        Expr::Pipeline { input, .. }
+        | Expr::TryPipeline { input, .. }
+        | Expr::PipelineResult { input, .. } => input
+            .as_ref()
+            .is_some_and(|input| expr_uses_process_args(input)),
+        Expr::Match { value, arms } => {
+            expr_uses_process_args(value) || arms.iter().any(match_arm_uses_process_args)
+        }
+        Expr::Closure { captures, .. } => captures
+            .iter()
+            .any(|capture| capture.source == "args" || capture.target == "args"),
+        Expr::RawString(_)
+        | Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Bool(_)
+        | Expr::Unit
+        | Expr::None
+        | Expr::Command { .. }
+        | Expr::CommandResult { .. }
+        | Expr::AsyncCommand(_)
+        | Expr::Await(_)
+        | Expr::HasCommand(_)
+        | Expr::TupleField { .. }
+        | Expr::EnvDefault { .. }
+        | Expr::Env(_)
+        | Expr::JsonStringify { .. } => false,
+    }
+}
+
+fn interpolation_mentions_args(value: &str) -> bool {
+    interpolation_names(value, 0).is_ok_and(|names| names.iter().any(|name| name == "args"))
+}
+
+fn argument_count(count: usize) -> String {
+    match count {
+        1 => "1 argument".to_string(),
+        other => format!("{other} arguments"),
     }
 }
 

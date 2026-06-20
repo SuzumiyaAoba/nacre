@@ -43,6 +43,73 @@ fn shell_and_raw_bash_are_rejected() {
 }
 
 #[test]
+fn environment_access_requires_an_allowed_name() {
+    let denied = compile_source(r#"const home = env.HOME ?? "/tmp""#).unwrap_err();
+    assert!(denied
+        .to_string()
+        .contains("environment variable `HOME` is not allowed by the execution policy"));
+
+    let policy = ExecutionPolicy::from_toml(
+        "[environment]\nread = [\"HOME\"]\n",
+        std::path::Path::new("."),
+    )
+    .unwrap();
+    compile_source_with_policy(r#"const home = process.env("HOME")"#, &policy).unwrap();
+
+    let dynamic = compile_source_with_policy(
+        r#"const key = "HOME"
+const home = process.env(key)
+"#,
+        &policy,
+    )
+    .unwrap_err();
+    assert!(dynamic
+        .to_string()
+        .contains("process.env requires a static string literal"));
+}
+
+#[test]
+fn process_arguments_require_policy_access() {
+    let cases = [
+        "const count = args.len()",
+        "const values = process.args()",
+        "const parsed = cli.parse()",
+        "const rendered = \"${args}\"",
+    ];
+
+    for source in cases {
+        let error = compile_source(source).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("process arguments are not allowed by the execution policy"),
+            "{error}"
+        );
+    }
+
+    let policy =
+        ExecutionPolicy::from_toml("[process]\nargs = true\n", std::path::Path::new(".")).unwrap();
+    compile_source_with_policy(
+        r#"
+const count = args.len()
+const values = process.args()
+const parsed = cli.parse()
+const rendered = args.join(",")
+"#,
+        &policy,
+    )
+    .unwrap();
+}
+
+#[test]
+fn args_binding_name_is_reserved_for_process_arguments() {
+    let error = compile_source("const args = []").unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("`args` is reserved for process arguments"));
+}
+
+#[test]
 fn approved_command_is_resolved_to_the_policy_executable() {
     let dir = unique_dir();
     fs::create_dir_all(&dir).unwrap();
@@ -51,7 +118,7 @@ fn approved_command_is_resolved_to_the_policy_executable() {
     fs::write(
         &policy_path,
         format!(
-            "[command_groups.inspect.commands.probe]\nprogram = {:?}\n",
+            "[command_groups.inspect.commands.probe]\nprogram = {:?}\nargs = 1\n",
             executable
         ),
     )
@@ -62,6 +129,12 @@ fn approved_command_is_resolved_to_the_policy_executable() {
         compile_source_with_policy(r#"const value = run.inspect.probe("hello")"#, &policy).unwrap();
     assert!(bash.contains(&executable.to_string_lossy().to_string()));
     assert!(bash.contains("__nacre_run_arg_0='hello'"));
+
+    let wrong_arity =
+        compile_source_with_policy(r#"const value = run.inspect.probe()"#, &policy).unwrap_err();
+    assert!(wrong_arity
+        .to_string()
+        .contains("expects 1 argument by policy, found 0"));
 
     let denied = compile_source(r#"const value = run.inspect.probe("hello")"#).unwrap_err();
     assert!(denied
@@ -87,7 +160,7 @@ fn filesystem_access_requires_an_allowed_root() {
         &policy,
     )
     .unwrap();
-    assert!(bash.contains("__nacre_assert_path_in_roots read"));
+    assert!(bash.contains("__nacre_checked_path read"));
 
     let denied = compile_source(r#"const lines = fs.readLines("/tmp/input.txt")"#).unwrap_err();
     assert!(denied
@@ -108,7 +181,7 @@ fn approved_command_arguments_are_not_evaluated_as_shell() {
     let policy_path = dir.join("policy.toml");
     fs::write(
         &policy_path,
-        "[command_groups.inspect.commands.echo]\nprogram = \"echo-args\"\n",
+        "[command_groups.inspect.commands.echo]\nprogram = \"echo-args\"\nargs = 3\n",
     )
     .unwrap();
     let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
@@ -197,7 +270,7 @@ fn command_path_arguments_are_guarded_before_execution() {
     let policy_path = dir.join("policy.toml");
     fs::write(
         &policy_path,
-        "[filesystem]\nread = [\"allowed\"]\n\n[command_groups.read.commands.file]\nprogram = \"reader\"\nread_args = [0]\n",
+        "[filesystem]\nread = [\"allowed\"]\n\n[command_groups.read.commands.file]\nprogram = \"reader\"\nargs = 1\nread_args = [0]\n",
     )
     .unwrap();
     let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
@@ -218,6 +291,49 @@ fn command_path_arguments_are_guarded_before_execution() {
 }
 
 #[test]
+fn command_path_arguments_are_canonicalized_before_execution() {
+    let dir = unique_dir();
+    let allowed = dir.join("allowed");
+    let nested = allowed.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(allowed.join("input.txt"), "safe\n").unwrap();
+    let script = dir.join("reader");
+    write_executable(
+        &script,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\"\n",
+    );
+    let policy_path = dir.join("policy.toml");
+    fs::write(
+        &policy_path,
+        "[filesystem]\nread = [\"allowed\"]\n\n[command_groups.read.commands.file]\nprogram = \"reader\"\nargs = 1\nread_args = [0]\n",
+    )
+    .unwrap();
+    let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
+    let source_path = nested.join("../input.txt");
+    let mut bash = compile_source_with_policy(
+        &format!("const output = run.read.file({source_path:?})"),
+        &policy,
+    )
+    .unwrap();
+    bash.push_str("\nprintf '%s\\n' \"$output\"\n");
+
+    let output = run_bash(&bash);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!(
+            "{}\n",
+            allowed.join("input.txt").canonicalize().unwrap().display()
+        )
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn malformed_policies_are_rejected() {
     let dir = unique_dir();
     fs::create_dir_all(&dir).unwrap();
@@ -227,7 +343,7 @@ fn malformed_policies_are_rejected() {
     let overlap = dir.join("overlap.toml");
     fs::write(
         &overlap,
-        "[command_groups.test.commands.command]\nprogram = \"command\"\nread_args = [0]\nwrite_args = [0]\n",
+        "[command_groups.test.commands.command]\nprogram = \"command\"\nargs = 1\nread_args = [0]\nwrite_args = [0]\n",
     )
     .unwrap();
     assert!(ExecutionPolicy::from_file(&overlap)
@@ -242,10 +358,39 @@ fn malformed_policies_are_rejected() {
         .to_string()
         .contains("failed to parse policy"));
 
+    let invalid_env = dir.join("invalid-env.toml");
+    fs::write(&invalid_env, "[environment]\nread = [\"BAD-NAME\"]\n").unwrap();
+    assert!(ExecutionPolicy::from_file(&invalid_env)
+        .unwrap_err()
+        .to_string()
+        .contains("invalid environment variable name"));
+
+    let missing_args = dir.join("missing-args.toml");
+    fs::write(
+        &missing_args,
+        "[command_groups.test.commands.command]\nprogram = \"command\"\n",
+    )
+    .unwrap();
+    assert!(ExecutionPolicy::from_file(&missing_args)
+        .unwrap_err()
+        .to_string()
+        .contains("must declare exact `args` count"));
+
+    let out_of_range_arg = dir.join("out-of-range-arg.toml");
+    fs::write(
+        &out_of_range_arg,
+        "[command_groups.test.commands.command]\nprogram = \"command\"\nargs = 1\nread_args = [1]\n",
+    )
+    .unwrap();
+    assert!(ExecutionPolicy::from_file(&out_of_range_arg)
+        .unwrap_err()
+        .to_string()
+        .contains("outside declared args count"));
+
     let writable_program = dir.join("writable-program.toml");
     fs::write(
         &writable_program,
-        "[filesystem]\nwrite = [\".\"]\n\n[command_groups.test.commands.command]\nprogram = \"command\"\n",
+        "[filesystem]\nwrite = [\".\"]\n\n[command_groups.test.commands.command]\nprogram = \"command\"\nargs = 0\n",
     )
     .unwrap();
     let error = ExecutionPolicy::from_file(&writable_program).unwrap_err();

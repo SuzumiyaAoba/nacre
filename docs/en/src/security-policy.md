@@ -2,9 +2,35 @@
 
 Nacre separates source code from authority. Source files describe typed
 computation and static capability calls; an external TOML policy decides which
-executables and filesystem roots those calls may access.
+environment variables, process arguments, executables, and filesystem roots
+those calls may access.
 
 Without `--policy`, the compiler uses a deny-all policy.
+
+## Environment Variables
+
+Grant individual environment variable names explicitly:
+
+```toml
+[environment]
+read = ["HOME", "SHELL"]
+```
+
+Both `env.NAME` and `process.env("NAME")` require the name to appear in this
+list. `process.env(...)` accepts only a static string literal name.
+
+## Process Arguments
+
+Grant access to script arguments explicitly:
+
+```toml
+[process]
+args = true
+```
+
+Bare `args`, `process.args()`, and `cli.parse()` all require this permission.
+Without it, generated programs cannot read command-line arguments supplied to
+the script.
 
 ## Command Capabilities
 
@@ -19,11 +45,13 @@ The policy maps that name to one executable:
 ```toml
 [command_groups.inspect.commands.git]
 program = "/usr/bin/git"
+args = 1
 read_args = []
 write_args = []
 ```
 
 The source cannot substitute another group, command, or executable at runtime.
+The policy also fixes the exact argument count accepted by the source call.
 Relative `program` paths are resolved from the policy file directory and
 canonicalized when the policy is loaded.
 
@@ -48,6 +76,8 @@ write = ["output"]
 Roots must exist when the policy is loaded. Runtime guards resolve the requested
 path and require it to be the root itself or a descendant. A new write target
 is allowed when its parent directory exists beneath an allowed write root.
+Filesystem operations and guarded command path arguments use the resolved
+physical path after the guard succeeds.
 
 ## Guard Command Arguments
 
@@ -60,6 +90,7 @@ write = ["output"]
 
 [command_groups.convert.commands.document]
 program = "bin/convert-document"
+args = 2
 read_args = [0]
 write_args = [1]
 ```
@@ -72,7 +103,10 @@ executable. The same position cannot appear in both lists.
 Policy loading rejects:
 
 - Unknown fields.
+- Invalid environment variable names.
 - Invalid group or command identifiers.
+- Missing command `args` counts.
+- Command path-argument positions outside the declared `args` count.
 - Missing or non-file executables.
 - Command executables located inside an allowed write root.
 - Missing filesystem roots.

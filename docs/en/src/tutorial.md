@@ -54,6 +54,7 @@ Create `policy.toml`:
 ```toml
 [command_groups.output.commands.echo]
 program = "bin/echo"
+args = 1
 ```
 
 The executable path is resolved relative to the policy file and canonicalized.

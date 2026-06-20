@@ -22,7 +22,6 @@ fn cli_writes_to_stdout_and_file_and_reports_usage() {
 const answer = 42
 const no = false
 const text = "a\"b"
-const home = env.HOME ?? "/tmp"
 let count = 1
 count = count + 2 * 3
 const cmp = count >= 7
@@ -48,7 +47,7 @@ const cmp = count >= 7
     }
     fs::write(
         &policy,
-        "[command_groups.inspect.commands.command]\nprogram = \"approved-command\"\n",
+        "[command_groups.inspect.commands.command]\nprogram = \"approved-command\"\nargs = 1\n",
     )
     .unwrap();
 

@@ -11,9 +11,22 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("nacre-surface-{name}-{unique}"))
 }
 
+fn env_policy(names: &[&str]) -> ExecutionPolicy {
+    let read = names
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    ExecutionPolicy::from_toml(
+        &format!("[environment]\nread = [{read}]\n"),
+        std::path::Path::new("."),
+    )
+    .unwrap()
+}
+
 #[test]
 fn compiles_comprehensive_structural_surface() {
-    compile_source(
+    compile_source_with_policy(
         r#"
 const answer = 42
 const hex: Int = 0xFF
@@ -93,7 +106,6 @@ const rawText = r"keep \n raw"
 const joinedText = "join" ++ "ed"
 const shell = env.SHELL
 const home = env.HOME ?? "/tmp"
-const hasGit = hasCommand("git")
 let count = 10
 count = count - 2 / 1 % 2
 let widened: Float = answer
@@ -122,6 +134,7 @@ for person in names {
 const copiedPerson = person
 }
 "#,
+        &env_policy(&["SHELL", "HOME"]),
     )
     .unwrap();
 }
@@ -278,7 +291,7 @@ fn compiles_builtin_and_policy_capability_surface() {
     let policy_path = dir.join("policy.toml");
     fs::write(
         &policy_path,
-        "[filesystem]\nread = [\"root\"]\nwrite = [\"root\"]\n\n[command_groups.read.commands.file]\nprogram = \"command\"\nread_args = [0]\n\n[command_groups.output.commands.print]\nprogram = \"command\"\n",
+        "[environment]\nread = [\"HOME\"]\n\n[process]\nargs = true\n\n[filesystem]\nread = [\"root\"]\nwrite = [\"root\"]\n\n[command_groups.read.commands.file]\nprogram = \"command\"\nargs = 1\nread_args = [0]\n\n[command_groups.output.commands.print]\nprogram = \"command\"\nargs = 1\n",
     )
     .unwrap();
     let policy = ExecutionPolicy::from_file(&policy_path).unwrap();

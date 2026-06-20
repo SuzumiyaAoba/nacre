@@ -61,12 +61,9 @@ fn resolve_module_path(
     line: usize,
 ) -> Result<PathBuf, CompileError> {
     let relative = parts.iter().collect::<PathBuf>();
-    let mut roots = vec![
-        base_dir.to_path_buf(),
-        Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),
-    ];
-    if let Ok(paths) = std::env::var("NACRE_PATH") {
-        roots.extend(std::env::split_paths(&paths));
+    let mut roots = vec![base_dir.to_path_buf()];
+    if parts.first().is_some_and(|part| part == "std") {
+        roots.push(Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf());
     }
     for root in roots {
         let file = root.join(&relative).with_extension("ncr");
@@ -118,6 +115,30 @@ mod tests {
         let error = resolve_module_path(&root, &["missing".into()], 7).unwrap_err();
         assert_eq!(error.line(), 7);
         assert!(error.message().contains("module `missing` was not found"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_only_local_modules_and_bundled_std_modules() {
+        let root = temp_path("module-roots");
+        fs::create_dir_all(&root).unwrap();
+
+        assert_eq!(
+            resolve_module_path(&root, &["std".into(), "path".into()], 1).unwrap(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("std/path.ncr")
+        );
+
+        let error = resolve_module_path(
+            &root,
+            &["docs".into(), "examples".into(), "hello".into()],
+            9,
+        )
+        .unwrap_err();
+        assert_eq!(error.line(), 9);
+        assert!(error
+            .message()
+            .contains("module `docs.examples.hello` was not found"));
 
         fs::remove_dir_all(root).unwrap();
     }

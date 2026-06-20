@@ -3,7 +3,16 @@ use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn run_source(source: &str, trailer: &str, args: &[&str]) -> Output {
-    let mut bash = nacre::compile_source(source).unwrap();
+    run_source_with_policy(source, &nacre::ExecutionPolicy::deny_all(), trailer, args)
+}
+
+fn run_source_with_policy(
+    source: &str,
+    policy: &nacre::ExecutionPolicy,
+    trailer: &str,
+    args: &[&str],
+) -> Output {
+    let mut bash = nacre::compile_source_with_policy(source, policy).unwrap();
     bash.push('\n');
     bash.push_str(trailer);
     Command::new("bash")
@@ -310,12 +319,16 @@ const rect = describe(Rect(2, 7))
 
 #[test]
 fn generated_bash_exposes_script_arguments() {
-    let output = run_source(
+    let policy =
+        nacre::ExecutionPolicy::from_toml("[process]\nargs = true\n", std::path::Path::new("."))
+            .unwrap();
+    let output = run_source_with_policy(
         r#"
 const count = args.len()
 const first = args[0]
 const joined = args.join("|")
 "#,
+        &policy,
         "printf '%s|%s|%s\\n' \"$count\" \"$first\" \"$joined\"",
         &["one", "two words"],
     );
@@ -387,6 +400,7 @@ fn unsafe_shell_constructs_are_rejected_by_public_apis() {
         r#"$sh"echo unsafe""#,
         "raw {\necho unsafe\n}\n",
         r#"require("git")"#,
+        r#"const found = hasCommand("git")"#,
         r#"const value = $sh"printf unsafe" |> $sh"cat""#,
     ] {
         let error = nacre::compile_source(source).unwrap_err();

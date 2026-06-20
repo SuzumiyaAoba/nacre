@@ -36,6 +36,7 @@ run.output.echo(message)
 ```toml
 [command_groups.output.commands.echo]
 program = "bin/echo"
+args = 1
 ```
 
 次のようにコンパイルします。

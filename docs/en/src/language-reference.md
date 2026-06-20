@@ -204,9 +204,9 @@ const file: Path = "/tmp/archive.tar.gz"
 const extension = path.extname(file)
 ```
 
-Imported declarations are namespaced. Bundled modules include `std.cli`,
-`std.fs`, `std.io`, `std.json`, `std.log`, `std.path`, `std.process`,
-`std.str`, and `std.test`.
+Imported declarations are namespaced. Non-`std` modules resolve only relative to
+the importing file. Bundled modules include `std.cli`, `std.fs`, `std.io`,
+`std.json`, `std.log`, `std.path`, `std.process`, `std.str`, and `std.test`.
 
 ## Environment and Arguments
 
@@ -217,7 +217,10 @@ const arguments: [String] = args
 ```
 
 Environment values and command-line arguments are untrusted data. They remain
-single arguments when passed to an approved command.
+single arguments when passed to an approved command. Environment variable names
+must be listed in the execution policy; `process.env(...)` accepts only a static
+string literal name. Command-line arguments require `[process] args = true` in
+the execution policy.
 
 ## Approved Commands
 
@@ -252,6 +255,6 @@ The safe profile rejects:
 - Raw Bash blocks
 - Shell pipelines and redirects
 - Background, asynchronous, or spawned shell commands
-- `require(...)` and `requireOneOf(...)`
+- `hasCommand(...)`, `require(...)`, and `requireOneOf(...)`
 
 Use a narrowly scoped, reviewed executable in the policy instead.

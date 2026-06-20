@@ -49,6 +49,8 @@ cargo run -- \
 
 `--policy` must precede the positional paths. Relative executable and
 filesystem paths inside the policy are resolved from the policy file directory.
+Source modules are resolved from the importing file's directory; only `std.*`
+imports use the bundled standard library.
 
 ## Exit Status
 

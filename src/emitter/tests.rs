@@ -3,17 +3,31 @@ use super::local_mangling::{
     mangle_shell_interpolations, sanitize_shell_ident, LocalMangler,
 };
 use super::*;
-use crate::{compile_source, parse, MatchArm, Type};
+use crate::{compile_source, compile_source_with_policy, parse, ExecutionPolicy, MatchArm, Type};
+
+fn env_policy(names: &[&str]) -> ExecutionPolicy {
+    let read = names
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    ExecutionPolicy::from_toml(
+        &format!("[environment]\nread = [{read}]\n"),
+        std::path::Path::new("."),
+    )
+    .unwrap()
+}
 
 #[test]
 fn compiles_assignments() {
-    let bash = compile_source(
+    let bash = compile_source_with_policy(
         r#"
 const name = "Nacre"
 let count = 40
 count = count + 2
 const home = env.HOME ?? "/tmp"
 "#,
+        &env_policy(&["HOME"]),
     )
     .unwrap();
 
@@ -25,7 +39,7 @@ const home = env.HOME ?? "/tmp"
 
 #[test]
 fn compiles_boolean_comparison_and_string_quoting() {
-    let bash = compile_source(
+    let bash = compile_source_with_policy(
         r#"
 const ok = true
 const nope = false
@@ -35,6 +49,7 @@ const bools = true == false
 const sameFlag = ok == nope
 const envTest = env.PATH ?? "/bin" == "/bin"
 "#,
+        &env_policy(&["PATH"]),
     )
     .unwrap();
 
@@ -100,7 +115,7 @@ const ge = 2 >= 1
 
 #[test]
 fn compiles_annotated_primitive_literals() {
-    let bash = compile_source(
+    let bash = compile_source_with_policy(
         r#"
 const hex: Int = 0xFF
 const bits = 0b1010
@@ -142,7 +157,6 @@ const uid: UserId = UserId(42)
 const rawUid: Int = uid.value
 const greeting = "Hello, ${name}"
 const rawGreeting = r"Hello, ${name}"
-const hasGit = hasCommand("git")
 let count = 5
 count = count % 2
 if count > 0 {
@@ -161,6 +175,7 @@ for person in names {
 const copiedPerson = person
 }
 "#,
+        &env_policy(&["SHELL"]),
     )
     .unwrap();
 
@@ -211,9 +226,6 @@ const copiedPerson = person
     assert!(bash.contains("readonly rawUid=\"$uid\""));
     assert!(bash.contains("readonly greeting=\"Hello, ${name}\""));
     assert!(bash.contains("readonly rawGreeting='Hello, ${name}'"));
-    assert!(bash.contains(
-        "readonly hasGit=$(command -v 'git' >/dev/null 2>&1 && printf true || printf false)"
-    ));
     assert!(
         bash.contains("count=$(awk -v __nacre_0=\"$count\" 'BEGIN { print ((__nacre_0 % 2)) }')")
     );

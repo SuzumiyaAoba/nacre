@@ -1,1 +1,2 @@
 ## process.args and process.env(name) are compiler built-ins.
+## process.args requires [process] args = true in the execution policy.

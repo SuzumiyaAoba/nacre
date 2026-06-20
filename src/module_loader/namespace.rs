@@ -2056,13 +2056,8 @@ fn namespace_interpolations(
 mod tests {
     use super::*;
     use crate::{compile_file, compile_source};
-    use std::env;
-    use std::ffi::OsString;
     use std::fs;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    static NACRE_PATH_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn compile_file_reads_source() {
@@ -2144,62 +2139,6 @@ const clean = str.trim(" nacre ")
 
         assert_eq!(error.line(), 1);
         assert!(error.message().contains("invalid variable name"));
-    }
-
-    #[test]
-    fn module_expansion_handles_repeated_files_and_nacre_path() {
-        let _guard = NACRE_PATH_LOCK.lock().unwrap();
-        let root = temp_path("nacre-path-modules");
-        let main_dir = temp_path("nacre-path-main");
-        fs::create_dir_all(&root).unwrap();
-        fs::create_dir_all(&main_dir).unwrap();
-        let module = root.join("shared.ncr");
-        let main = main_dir.join("main.ncr");
-        fs::write(&module, "use shared\nconst sharedValue = \"ok\"\n").unwrap();
-        fs::write(&main, "use shared\n").unwrap();
-
-        let previous = env::var_os("NACRE_PATH");
-        env::set_var("NACRE_PATH", &root);
-        let bash = compile_file(&main).unwrap();
-        restore_nacre_path(previous);
-        fs::remove_dir_all(&root).unwrap();
-        fs::remove_dir_all(&main_dir).unwrap();
-
-        assert!(bash.contains("readonly shared_sharedValue='ok'"));
-    }
-
-    #[test]
-    fn module_expansion_restores_existing_nacre_path() {
-        let _guard = NACRE_PATH_LOCK.lock().unwrap();
-        let root = temp_path("nacre-path-existing-modules");
-        let main_dir = temp_path("nacre-path-existing-main");
-        fs::create_dir_all(&root).unwrap();
-        fs::create_dir_all(&main_dir).unwrap();
-        let module = root.join("shared.ncr");
-        let main = main_dir.join("main.ncr");
-        fs::write(&module, "const sharedValue = \"ok\"\n").unwrap();
-        fs::write(&main, "use shared\n").unwrap();
-
-        let original = env::var_os("NACRE_PATH");
-        env::set_var("NACRE_PATH", &root);
-        let previous = env::var_os("NACRE_PATH");
-        env::set_var("NACRE_PATH", &root);
-        let bash = compile_file(&main).unwrap();
-        restore_nacre_path(previous);
-        restore_nacre_path(None);
-        restore_nacre_path(original);
-        fs::remove_dir_all(&root).unwrap();
-        fs::remove_dir_all(&main_dir).unwrap();
-
-        assert!(bash.contains("readonly shared_sharedValue='ok'"));
-    }
-
-    fn restore_nacre_path(value: Option<OsString>) {
-        if let Some(value) = value {
-            env::set_var("NACRE_PATH", value);
-        } else {
-            env::remove_var("NACRE_PATH");
-        }
     }
 
     #[test]
@@ -2347,6 +2286,6 @@ const clean = str.trim(" nacre ")
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        env::temp_dir().join(format!("nacre-{unique}-{name}"))
+        std::env::temp_dir().join(format!("nacre-{unique}-{name}"))
     }
 }

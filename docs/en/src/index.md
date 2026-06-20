@@ -36,6 +36,7 @@ The command is not selected by this source. A policy maps
 ```toml
 [command_groups.output.commands.echo]
 program = "bin/echo"
+args = 1
 ```
 
 Compile the program with:

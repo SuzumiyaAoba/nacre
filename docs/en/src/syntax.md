@@ -40,10 +40,12 @@ read = ["input"]
 
 [command_groups.read.commands.document]
 program = "bin/read-document"
+args = 1
 read_args = [0]
 
 [command_groups.output.commands.print]
 program = "bin/print"
+args = 1
 ```
 
 ## Safe Profile

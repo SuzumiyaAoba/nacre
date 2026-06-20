@@ -18,7 +18,8 @@ cargo run -- --policy docs/examples/policy.toml docs/examples/hello.ncr /tmp/hel
 bash /tmp/hello.sh
 ```
 
-Commands and filesystem operations require an externally reviewed TOML policy:
+Environment variable reads, commands, and filesystem operations require an
+externally reviewed TOML policy:
 
 ```bash
 cargo run -- --policy nacre-policy.toml input.ncr output.sh

@@ -1,6 +1,14 @@
 use super::*;
 use crate::parse;
 
+fn env_policy() -> ExecutionPolicy {
+    ExecutionPolicy::from_toml(
+        "[environment]\nread = [\"HOME\"]\n",
+        std::path::Path::new("."),
+    )
+    .unwrap()
+}
+
 #[test]
 fn type_checks_bindings_and_operator_operands() {
     let valid = parse(
@@ -17,7 +25,6 @@ const unit: Unit = ()
 const copied = answer
 const greeting = "Hello, ${text}"
 const rawGreeting = r"Hello, ${missing}"
-const hasGit = hasCommand("git")
 const names: [String] = ["alice", "bob"]
 const [firstUser, ...remainingUsers] = names
 const nums = [1, 2, 3]
@@ -98,7 +105,7 @@ const _ = missing_ok
     )
     .unwrap();
 
-    assert!(type_check(&valid).is_err());
+    assert!(type_check_and_lower_with_policy(&valid, &env_policy()).is_err());
 
     let valid = parse(
         r#"
@@ -135,7 +142,7 @@ const _ = "discarded"
 "#,
     )
     .unwrap();
-    type_check(&valid).unwrap();
+    type_check_and_lower_with_policy(&valid, &env_policy()).unwrap();
 
     let discarded_assignment = parse("_ = 1").unwrap();
     type_check(&discarded_assignment).unwrap();

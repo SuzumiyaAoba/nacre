@@ -1,1 +1,2 @@
 ## cli.parse() is implemented by the compiler because it returns a Bash map.
+## It requires [process] args = true in the execution policy.

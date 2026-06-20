@@ -37,7 +37,7 @@ __nacre_resolve_guarded_path() {
   printf '%s/%s\n' "$__nacre_parent" "$__nacre_base"
 }
 
-__nacre_assert_path_in_roots() {
+__nacre_checked_path() {
   local __nacre_access="$1"
   local __nacre_path="$2"
   local __nacre_resolved
@@ -54,11 +54,16 @@ __nacre_assert_path_in_roots() {
   local __nacre_root
   for __nacre_root in "${__nacre_roots[@]}"; do
     if [[ "$__nacre_resolved" == "$__nacre_root" || "$__nacre_resolved" == "$__nacre_root/"* ]]; then
+      printf '%s\n' "$__nacre_resolved"
       return 0
     fi
   done
   printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
   return 126
+}
+
+__nacre_assert_path_in_roots() {
+  __nacre_checked_path "$1" "$2" >/dev/null
 }
 "#,
     );

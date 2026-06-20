@@ -1,9 +1,14 @@
+[environment]
+read = ["HOME", "SHELL"]
+
 [filesystem]
 read = ["workspace"]
 write = ["workspace"]
 
 [command_groups.output.commands.echo]
 program = "bin/echo"
+args = 1
 
 [command_groups.inspect.commands.version]
 program = "bin/version"
+args = 0

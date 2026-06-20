@@ -55,6 +55,7 @@ run.output.echo(greet("Nacre"))
 ```toml
 [command_groups.output.commands.echo]
 program = "bin/echo"
+args = 1
 ```
 
 実行ファイルのパスはポリシーファイルからの相対パスとして解決され、
