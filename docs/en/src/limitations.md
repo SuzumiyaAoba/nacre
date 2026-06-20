@@ -29,7 +29,8 @@ syntax.
 - Some structured values use compiler-provided Bash runtime helpers.
 - Diagnostics report source lines, but do not yet provide rich source spans or
   editor integration.
-- There is no stable package registry or dependency resolver.
+- Dependency resolution supports only local path dependencies from
+  `nacre.toml`. There is not yet a stable public registry or lockfile.
 
 ## Documentation
 

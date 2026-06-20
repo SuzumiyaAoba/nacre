@@ -125,8 +125,10 @@ Treat the following as trusted inputs:
 - Every executable or script named by the policy.
 - The compiler and generated runtime helpers.
 
-Treat Nacre source, environment values, script arguments, and data files as
-potentially untrusted.
+Treat Nacre source, Nacre packages loaded through local path dependencies,
+environment values, script arguments, and data files as potentially untrusted.
+Dependency packages do not carry separate authority; capability calls in them
+are checked against the same external policy as the importing program.
 
 The runtime guards reduce path escape risk but cannot eliminate filesystem
 time-of-check/time-of-use races against a concurrently malicious process.

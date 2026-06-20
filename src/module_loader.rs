@@ -1,17 +1,140 @@
 mod namespace;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 use crate::{parse, CompileError, Program, Statement};
 
 pub(crate) fn load_program(path: &Path) -> Result<Program, CompileError> {
+    let resolver = DependencyResolver::discover(path)?;
     let mut seen = HashSet::new();
-    parse_file_expanded(path, &mut seen)
+    parse_file_expanded(path, &resolver, &mut seen)
 }
 
-fn parse_file_expanded(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Program, CompileError> {
+#[derive(Default)]
+struct DependencyResolver {
+    dependencies: HashMap<String, PathBuf>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageManifest {
+    #[serde(default)]
+    package: Option<PackageMetadata>,
+    #[serde(default)]
+    dependencies: BTreeMap<String, PackageDependency>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageMetadata {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageDependency {
+    path: PathBuf,
+}
+
+impl DependencyResolver {
+    fn discover(input: &Path) -> Result<Self, CompileError> {
+        let Some(manifest) = find_manifest(input.parent().unwrap_or_else(|| Path::new("."))) else {
+            return Ok(Self::default());
+        };
+        Self::from_manifest(&manifest)
+    }
+
+    fn from_manifest(manifest: &Path) -> Result<Self, CompileError> {
+        let source = fs::read_to_string(manifest).map_err(|error| {
+            CompileError::new(0, format!("failed to read {}: {error}", manifest.display()))
+        })?;
+        let manifest_value = toml::from_str::<PackageManifest>(&source).map_err(|error| {
+            CompileError::new(
+                0,
+                format!("failed to parse {}: {error}", manifest.display()),
+            )
+        })?;
+        if let Some(package) = &manifest_value.package {
+            if let Some(name) = &package.name {
+                if !is_package_name(name) || name == "std" {
+                    return Err(CompileError::new(
+                        0,
+                        format!("invalid package name `{name}` in {}", manifest.display()),
+                    ));
+                }
+            }
+            if package.version.as_deref().is_some_and(str::is_empty) {
+                return Err(CompileError::new(
+                    0,
+                    format!(
+                        "package version must not be empty in {}",
+                        manifest.display()
+                    ),
+                ));
+            }
+        }
+        let manifest_dir = manifest.parent().unwrap_or_else(|| Path::new("."));
+        let mut dependencies = HashMap::new();
+        for (name, dependency) in manifest_value.dependencies {
+            if !is_package_name(&name) || name == "std" {
+                return Err(CompileError::new(
+                    0,
+                    format!("invalid dependency name `{name}` in {}", manifest.display()),
+                ));
+            }
+            let root = manifest_dir.join(dependency.path);
+            if !root.is_dir() {
+                return Err(CompileError::new(
+                    0,
+                    format!(
+                        "dependency `{name}` path is not a directory: {}",
+                        root.display()
+                    ),
+                ));
+            }
+            dependencies.insert(
+                name,
+                fs::canonicalize(&root).unwrap_or_else(|_| root.to_path_buf()),
+            );
+        }
+        Ok(Self { dependencies })
+    }
+
+    fn dependency_root(&self, name: &str) -> Option<&Path> {
+        self.dependencies.get(name).map(PathBuf::as_path)
+    }
+}
+
+fn find_manifest(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let manifest = dir.join("nacre.toml");
+        if manifest.is_file() {
+            return Some(manifest);
+        }
+    }
+    None
+}
+
+fn is_package_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn parse_file_expanded(
+    path: &Path,
+    resolver: &DependencyResolver,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<Program, CompileError> {
     let source = fs::read_to_string(path).map_err(|error| {
         CompileError::new(0, format!("failed to read {}: {error}", path.display()))
     })?;
@@ -23,6 +146,7 @@ fn parse_file_expanded(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Progr
     expand_modules(
         program,
         path.parent().unwrap_or_else(|| Path::new(".")),
+        resolver,
         seen,
     )
 }
@@ -30,14 +154,15 @@ fn parse_file_expanded(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Progr
 fn expand_modules(
     program: Program,
     base_dir: &Path,
+    resolver: &DependencyResolver,
     seen: &mut HashSet<PathBuf>,
 ) -> Result<Program, CompileError> {
     let mut statements = Vec::new();
     let mut lines = Vec::new();
     for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
         if let Statement::Use { path } = statement {
-            let module_path = resolve_module_path(base_dir, path, *line)?;
-            let module = parse_file_expanded(&module_path, seen)?;
+            let module_path = resolve_module_path_with_deps(base_dir, path, *line, resolver)?;
+            let module = parse_file_expanded(&module_path, resolver, seen)?;
             let Some(namespace) = path.last() else {
                 return Err(CompileError::new(
                     *line,
@@ -55,11 +180,26 @@ fn expand_modules(
     Ok(Program::new(statements, lines))
 }
 
+#[cfg(test)]
 fn resolve_module_path(
     base_dir: &Path,
     parts: &[String],
     line: usize,
 ) -> Result<PathBuf, CompileError> {
+    resolve_module_path_with_deps(base_dir, parts, line, &DependencyResolver::default())
+}
+
+fn resolve_module_path_with_deps(
+    base_dir: &Path,
+    parts: &[String],
+    line: usize,
+    resolver: &DependencyResolver,
+) -> Result<PathBuf, CompileError> {
+    if let Some(package) = parts.first() {
+        if let Some(root) = resolver.dependency_root(package) {
+            return resolve_dependency_module_path(package, root, &parts[1..], parts, line);
+        }
+    }
     let relative = parts.iter().collect::<PathBuf>();
     let mut roots = vec![base_dir.to_path_buf()];
     if parts.first().is_some_and(|part| part == "std") {
@@ -85,10 +225,52 @@ fn resolve_module_path(
     ))
 }
 
+fn resolve_dependency_module_path(
+    package: &str,
+    root: &Path,
+    parts: &[String],
+    full_parts: &[String],
+    line: usize,
+) -> Result<PathBuf, CompileError> {
+    if parts.is_empty() {
+        let index = root.join("index.ncr");
+        if index.is_file() {
+            return Ok(index);
+        }
+    } else if let Some(path) = resolve_module_under_root(root, parts) {
+        return Ok(path);
+    }
+    Err(CompileError::new(
+        line,
+        format!(
+            "module `{}` was not found in dependency `{package}`",
+            full_parts.join(".")
+        ),
+    ))
+}
+
+fn resolve_module_under_root(root: &Path, parts: &[String]) -> Option<PathBuf> {
+    let relative = parts.iter().collect::<PathBuf>();
+    let file = root.join(&relative).with_extension("ncr");
+    if file.is_file() {
+        return Some(file);
+    }
+    let definition = root.join(&relative).with_extension("d.ncr");
+    if definition.is_file() {
+        return Some(definition);
+    }
+    let index = root.join(&relative).join("index.ncr");
+    if index.is_file() {
+        return Some(index);
+    }
+    None
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::compile_file;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -139,6 +321,85 @@ mod tests {
         assert!(error
             .message()
             .contains("module `docs.examples.hello` was not found"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compile_file_resolves_local_package_dependencies() {
+        let root = temp_path("package-deps");
+        let app = root.join("app");
+        let tools = root.join("tools");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&tools).unwrap();
+        fs::write(
+            app.join("nacre.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.tools]\npath = \"../tools\"\n",
+        )
+        .unwrap();
+        fs::write(
+            tools.join("format.ncr"),
+            "fn label(value: String): String {\nreturn \"tool:${value}\"\n}\n",
+        )
+        .unwrap();
+        let main = app.join("main.ncr");
+        fs::write(
+            &main,
+            "use tools.format\nconst result = format.label(\"ok\")\n",
+        )
+        .unwrap();
+
+        let program = load_program(&main).unwrap();
+        assert!(program.statements().iter().any(|statement| matches!(
+            statement,
+            Statement::Function { name, .. } if name == "format.label"
+        )));
+        compile_file(&main).unwrap();
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_local_package_module_reports_dependency_name() {
+        let root = temp_path("missing-package-module");
+        let app = root.join("app");
+        let tools = root.join("tools");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&tools).unwrap();
+        fs::write(
+            app.join("nacre.toml"),
+            "[dependencies.tools]\npath = \"../tools\"\n",
+        )
+        .unwrap();
+        let main = app.join("main.ncr");
+        fs::write(&main, "use tools.missing\n").unwrap();
+
+        let error = load_program(&main).unwrap_err();
+        assert_eq!(error.line(), 1);
+        assert!(error
+            .message()
+            .contains("module `tools.missing` was not found in dependency `tools`"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_local_package_dependency_reports_manifest_error() {
+        let root = temp_path("invalid-package-dep");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("nacre.toml"),
+            "[dependencies.tools]\npath = \"missing\"\n",
+        )
+        .unwrap();
+        let main = root.join("main.ncr");
+        fs::write(&main, "").unwrap();
+
+        let error = load_program(&main).unwrap_err();
+        assert_eq!(error.line(), 0);
+        assert!(error
+            .message()
+            .contains("dependency `tools` path is not a directory"));
 
         fs::remove_dir_all(root).unwrap();
     }

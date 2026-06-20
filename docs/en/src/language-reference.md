@@ -204,9 +204,35 @@ const file: Path = "/tmp/archive.tar.gz"
 const extension = path.extname(file)
 ```
 
-Imported declarations are namespaced. Non-`std` modules resolve only relative to
-the importing file. Bundled modules include `std.cli`, `std.fs`, `std.io`,
+Imported declarations are namespaced. Ordinary modules resolve relative to the
+importing file. Bundled modules include `std.cli`, `std.fs`, `std.io`,
 `std.json`, `std.log`, `std.path`, `std.process`, `std.str`, and `std.test`.
+
+When `nacre.toml` is found by walking upward from the input file, local path
+dependencies are available to imports.
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.tools]
+path = "../tools"
+```
+
+```nacre
+use tools.format
+
+const label = format.label("nacre")
+```
+
+The dependency name becomes the first `use` segment. `use tools.format` searches
+for `../tools/format.ncr`, `../tools/format.d.ncr`, or
+`../tools/format/index.ncr`. `use tools` searches for `index.ncr` at the
+dependency root. Relative imports and `std.*` imports keep their existing
+behavior. There is not yet a stable public registry or lockfile. The intended
+registry design is to record version requirements in the manifest and pin the
+resolved package name, version, source, and checksum in a lockfile.
 
 ## Environment and Arguments
 

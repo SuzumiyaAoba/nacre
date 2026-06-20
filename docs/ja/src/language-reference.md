@@ -205,10 +205,36 @@ const file: Path = "/tmp/archive.tar.gz"
 const extension = path.extname(file)
 ```
 
-読み込んだ宣言には名前空間が付きます。`std` 以外のモジュールは、読み込むファイルからの
-相対パスだけで解決されます。同梱モジュールには `std.cli`、`std.fs`、`std.io`、
+読み込んだ宣言には名前空間が付きます。通常のモジュールは、読み込むファイルからの
+相対パスで解決されます。同梱モジュールには `std.cli`、`std.fs`、`std.io`、
 `std.json`、`std.log`、`std.path`、`std.process`、`std.str`、`std.test` が
 あります。
+
+入力ファイルから上位ディレクトリへ `nacre.toml` を探索し、見つかった場合は
+ローカル path 依存を解決します。
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.tools]
+path = "../tools"
+```
+
+```nacre
+use tools.format
+
+const label = format.label("nacre")
+```
+
+依存名は `use` の先頭セグメントになります。`use tools.format` は
+`../tools/format.ncr`、`../tools/format.d.ncr`、または
+`../tools/format/index.ncr` を探します。`use tools` は依存ルートの
+`index.ncr` を探します。相対 import と `std.*` は従来通り利用できます。
+安定した公開レジストリと lockfile はまだありません。将来の registry 依存は
+manifest にバージョン制約を記録し、解決済みの package 名、バージョン、ソース、
+チェックサムを lockfile に固定する方針です。
 
 ## 環境変数と引数
 

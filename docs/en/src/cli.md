@@ -49,8 +49,10 @@ cargo run -- \
 
 `--policy` must precede the positional paths. Relative executable and
 filesystem paths inside the policy are resolved from the policy file directory.
-Source modules are resolved from the importing file's directory; only `std.*`
-imports use the bundled standard library.
+Source modules are resolved from the importing file's directory, and `std.*`
+imports use the bundled standard library. The compiler walks upward from the
+input file to find `nacre.toml`; `[dependencies.<name>] path = "..."` entries
+resolve local package paths relative to that manifest directory.
 
 ## Exit Status
 
