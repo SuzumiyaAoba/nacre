@@ -130,6 +130,18 @@ fn public_api_reports_representative_type_errors() {
             "const x = { name: \"Ada\" }\nconst y = x.age",
             "has no field `age`",
         ),
+        (
+            "const values = [1, 2]\nconst first: String = values[0]",
+            "type annotation mismatch",
+        ),
+        (
+            "const pair = (\"host\", 8080)\nconst port: String = pair._2",
+            "type annotation mismatch",
+        ),
+        (
+            "type Payload = Text(String) | Empty\nconst value = Text(1)",
+            "argument 1 for variant `Text`",
+        ),
     ];
 
     for (source, expected) in cases {
@@ -325,6 +337,101 @@ const rect = describe(Rect(2, 7))
     );
 
     assert_eq!(stdout(output), "2,4,6|7|circle:5|rect:2x7\n");
+}
+
+#[test]
+fn generated_bash_runs_match_guards_and_fallback_patterns() {
+    let output = run_source(
+        r#"
+type Payload = Text(String) | Pair(Int, Int) | Empty
+fn describe(value: Payload): String {
+return match value {
+Text(text) if text.len() > 0 => "text:${text}",
+Pair(left, right) if left == right => "square:${left}",
+Pair(left, right) => "pair:${left}:${right}",
+Empty => "empty",
+_ => "fallback"
+}
+}
+const text = describe(Text("nacre"))
+const square = describe(Pair(3, 3))
+const pair = describe(Pair(2, 5))
+const empty = describe(Empty)
+const fallback = match "other" { "text" => "bad", _ => "fallback" }
+"#,
+        "printf '%s|%s|%s|%s|%s\\n' \"$text\" \"$square\" \"$pair\" \"$empty\" \"$fallback\"",
+        &[],
+    );
+
+    assert_eq!(
+        stdout(output),
+        "text:nacre|square:3|pair:2:5|empty|fallback\n"
+    );
+}
+
+#[test]
+fn generated_bash_runs_nested_destructuring_and_collection_edges() {
+    let output = run_source(
+        r#"
+const values = [1, 2, 3]
+const [first, second, third] = values
+const restValues = ["head", "middle", "tail"]
+const [head, ...tail] = restValues
+const user = { name: "Ada", tags: ["compiler", "math"] }
+const { name, tags } = user
+const endpoint = { host: "localhost", port: 8080 }
+const endpointHost = endpoint.host
+const endpointPort = endpoint.port
+const endpointText = "${endpointHost}:${endpointPort}"
+const emptyItems: [String] = []
+const empty = emptyItems.isEmpty()
+const missingIndex = restValues.indexOf("absent")
+"#,
+        "printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$first\" \"$second\" \"$third\" \"$head\" \"${tail[1]}\" \"$name:${tags[0]}\" \"$endpointText\" \"$empty:$missingIndex\"",
+        &[],
+    );
+
+    assert_eq!(
+        stdout(output),
+        "1|2|3|head|tail|Ada:compiler|localhost:8080|true:-1\n"
+    );
+}
+
+#[test]
+fn generated_bash_runs_option_result_failure_paths_and_applicatives() {
+    let output = run_source(
+        r#"
+fn double(value: Int): Int {
+return value * 2
+}
+fn positive(value: Int): Int \/ String {
+if value > 0 {
+return Ok(value)
+}
+return Err("not-positive")
+}
+const noneValue: Int? = None
+const someValue: Int? = Some(5)
+const noneMapped = noneValue.map(double) ?? 99
+const noneFlat = noneValue.flatMap(value => Some(value + 1)) ?? 88
+const chosen = noneValue <|> someValue
+const chosenValue = chosen ?? 0
+const ok: Int \/ String = Ok(4)
+const err: Int \/ String = Err("bad")
+const errMapped = err.map(double)
+const errText = match errMapped { Err(message) => message, _ => "unexpected" }
+const flatErr = ok.flatMap(value => positive(value - 4))
+const flatText = match flatErr { Err(message) => message, _ => "unexpected" }
+const wrappedDouble: Result[Int => Int, String] = Ok(double)
+const appliedOk = wrappedDouble.ap(ok) ?? 0
+const appliedErr = wrappedDouble.ap(err)
+const appliedErrText = match appliedErr { Err(message) => message, _ => "unexpected" }
+"#,
+        "printf '%s|%s|%s|%s|%s|%s|%s\\n' \"$noneMapped\" \"$noneFlat\" \"$chosenValue\" \"$errText\" \"$flatText\" \"$appliedOk\" \"$appliedErrText\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "99|88|5|bad|not-positive|8|bad\n");
 }
 
 #[test]

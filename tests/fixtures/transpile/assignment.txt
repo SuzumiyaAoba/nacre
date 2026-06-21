@@ -1,0 +1,107 @@
+const name = "Nacre"
+let count = 40
+count = count + 2
+-----
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+__nacre_read_roots=( )
+__nacre_write_roots=( )
+__nacre_reject_symlink_components() {
+  local __nacre_path="$1"
+  local __nacre_root="$2"
+  if [[ "$__nacre_path" != /* ]]; then
+    __nacre_path="$PWD/$__nacre_path"
+  fi
+  local __nacre_current="/"
+  local __nacre_rest="${__nacre_path#/}"
+  local __nacre_part
+  local __nacre_candidate
+  while [[ -n "$__nacre_rest" ]]; do
+    if [[ "$__nacre_rest" == */* ]]; then
+      __nacre_part="${__nacre_rest%%/*}"
+      __nacre_rest="${__nacre_rest#*/}"
+    else
+      __nacre_part="$__nacre_rest"
+      __nacre_rest=""
+    fi
+    [[ -z "$__nacre_part" || "$__nacre_part" == "." ]] && continue
+    if [[ "$__nacre_part" == ".." ]]; then
+      __nacre_current="${__nacre_current%/*}"
+      [[ -z "$__nacre_current" ]] && __nacre_current="/"
+      continue
+    fi
+    if [[ "$__nacre_current" == "/" ]]; then
+      __nacre_candidate="/$__nacre_part"
+    else
+      __nacre_candidate="$__nacre_current/$__nacre_part"
+    fi
+    if [[ -L "$__nacre_candidate" ]]; then
+      if [[ "$__nacre_candidate" == "$__nacre_root" || "$__nacre_candidate" == "$__nacre_root/"* ]]; then
+        return 1
+      fi
+      if [[ -d "$__nacre_candidate" ]]; then
+        __nacre_current="$(cd -P -- "$__nacre_candidate" && pwd -P)" || return 1
+        continue
+      fi
+    fi
+    __nacre_current="$__nacre_candidate"
+  done
+}
+
+__nacre_resolve_guarded_path() {
+  local __nacre_path="$1"
+  if [[ "$__nacre_path" != /* ]]; then
+    __nacre_path="$PWD/$__nacre_path"
+  fi
+  if [[ -d "$__nacre_path" ]]; then
+    (cd -P -- "$__nacre_path" && pwd -P)
+    return
+  fi
+  local __nacre_parent="${__nacre_path%/*}"
+  local __nacre_base="${__nacre_path##*/}"
+  if [[ ! -d "$__nacre_parent" ]]; then
+    return 1
+  fi
+  __nacre_parent="$(cd -P -- "$__nacre_parent" && pwd -P)" || return 1
+  printf '%s/%s\n' "$__nacre_parent" "$__nacre_base"
+}
+
+__nacre_checked_path() {
+  local __nacre_access="$1"
+  local __nacre_path="$2"
+  local __nacre_resolved
+  __nacre_resolved="$(__nacre_resolve_guarded_path "$__nacre_path")" || {
+    printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+    return 126
+  }
+  local -a __nacre_roots
+  if [[ "$__nacre_access" == read ]]; then
+    __nacre_roots=("${__nacre_read_roots[@]}")
+  else
+    __nacre_roots=("${__nacre_write_roots[@]}")
+  fi
+  local __nacre_root
+  for __nacre_root in "${__nacre_roots[@]}"; do
+    if [[ "$__nacre_resolved" == "$__nacre_root" || "$__nacre_resolved" == "$__nacre_root/"* ]]; then
+      if ! __nacre_reject_symlink_components "$__nacre_path" "$__nacre_root"; then
+        printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+        return 126
+      fi
+      printf '%s\n' "$__nacre_resolved"
+      return 0
+    fi
+  done
+  printf 'nacre: denied %s path: %s\n' "$__nacre_access" "$__nacre_path" >&2
+  return 126
+}
+
+__nacre_assert_path_in_roots() {
+  __nacre_checked_path "$1" "$2" >/dev/null
+}
+
+readonly name='Nacre'
+
+count=40
+
+count=$(awk -v __nacre_0="$count" 'BEGIN { print ((__nacre_0 + 2)) }')
