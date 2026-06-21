@@ -29,10 +29,11 @@ syntax.
   Function-value references count as reachable. Top-level initializers and
   trait implementations are checked conservatively.
 - Some structured values use compiler-provided Bash runtime helpers.
-- Diagnostics include line, column, source-line, and caret output, but there is
-  not yet a dedicated LSP server or CLI JSON output.
-- Dependency resolution supports only local path dependencies from
-  `nacre.toml`. There is not yet a stable public registry or lockfile.
+- Diagnostics include line, column, source-line, and caret output. The CLI can
+  emit a single diagnostic as JSON with `--diagnostic-format json`, but there is
+  not yet a dedicated LSP server.
+- Dependency resolution supports local path dependencies from `nacre.toml` and
+  validation through `nacre.lock`. There is not yet a stable public registry.
 
 ## Documentation
 

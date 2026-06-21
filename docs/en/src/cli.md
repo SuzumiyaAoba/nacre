@@ -5,7 +5,7 @@ The `nacre` binary parses, type-checks, and compiles one `.ncr` file to Bash.
 ## Usage
 
 ```text
-nacre [--policy policy.toml] <input.ncr> [output.sh]
+nacre [--policy policy.toml] [--diagnostic-format text|json] [--write-lock] <input.ncr> [output.sh]
 ```
 
 From the repository:
@@ -54,6 +54,15 @@ imports use the bundled standard library. The compiler walks upward from the
 input file to find `nacre.toml`; `[dependencies.<name>] path = "..."` entries
 resolve local package paths relative to that manifest directory.
 
+## Write a Lockfile
+
+```bash
+cargo run -- --write-lock app/main.ncr
+```
+
+`--write-lock` writes `nacre.lock` next to `nacre.toml`. When a lockfile exists,
+compilation validates path dependency roots and content fingerprints.
+
 ## Exit Status
 
 The CLI exits successfully after compilation and optional file writing.
@@ -66,8 +75,8 @@ It exits unsuccessfully for:
 - Output write errors.
 
 When available, errors include the file name, line, column, source line, and a
-caret range. Tools that need machine-readable diagnostics should use the Rust
-API `CompileError` accessors rather than parsing CLI text.
+caret range. `--diagnostic-format json` writes a single diagnostic as a JSON
+object to standard error.
 
 ## Library API
 
@@ -81,5 +90,4 @@ use nacre::{compile_file, compile_file_with_policy};
 in-memory source APIs. All return `Result<String, CompileError>`.
 `CompileError` keeps the existing `line()` and `message()` accessors and also
 provides `column()`, `end_line()`, `end_column()`, `source_name()`, and
-`source_line()`. Future LSP or JSON output should be built from this structured
-diagnostic model.
+`source_line()`, and `to_json()`.

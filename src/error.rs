@@ -77,6 +77,41 @@ impl CompileError {
     pub fn source_line(&self) -> Option<&str> {
         self.source_line.as_deref()
     }
+
+    pub fn to_json(&self) -> String {
+        format!(
+            "{{\"line\":{},\"column\":{},\"end_line\":{},\"end_column\":{},\"message\":\"{}\",\"source_name\":{},\"source_line\":{}}}",
+            self.line,
+            self.column,
+            self.end_line,
+            self.end_column,
+            json_escape(&self.message),
+            json_option(self.source_name.as_deref()),
+            json_option(self.source_line.as_deref())
+        )
+    }
+}
+
+fn json_option(value: Option<&str>) -> String {
+    value
+        .map(|value| format!("\"{}\"", json_escape(value)))
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 impl fmt::Display for CompileError {

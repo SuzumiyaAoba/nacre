@@ -41,6 +41,13 @@ const nothing: Unit = ()
 Explicit casts support `String`/`Path` conversion, numeric widening where
 allowed, and newtype conversion.
 
+Type annotations can use union and intersection types.
+
+```nacre
+const input: String | Path = "input.txt"
+const pathLike: String & Path = "input.txt"
+```
+
 ## Structured Values
 
 ```nacre
@@ -230,9 +237,10 @@ The dependency name becomes the first `use` segment. `use tools.format` searches
 for `../tools/format.ncr`, `../tools/format.d.ncr`, or
 `../tools/format/index.ncr`. `use tools` searches for `index.ncr` at the
 dependency root. Relative imports and `std.*` imports keep their existing
-behavior. There is not yet a stable public registry or lockfile. The intended
-registry design is to record version requirements in the manifest and pin the
-resolved package name, version, source, and checksum in a lockfile.
+behavior. `nacre --write-lock input.ncr` writes `nacre.lock` next to the
+manifest. When a lockfile exists, path dependency roots and content
+fingerprints are verified during compilation. Public registry dependencies do
+not exist yet.
 
 ## Environment and Arguments
 

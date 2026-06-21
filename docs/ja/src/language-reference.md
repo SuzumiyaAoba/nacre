@@ -40,6 +40,13 @@ const nothing: Unit = ()
 明示的なキャストは、`String` と `Path` の変換、許可された数値の拡張、
 newtype の変換に対応します。
 
+型注釈では union 型と intersection 型を記述できます。
+
+```nacre
+const input: String | Path = "input.txt"
+const pathLike: String & Path = "input.txt"
+```
+
 ## 構造化された値
 
 ```nacre
@@ -232,9 +239,9 @@ const label = format.label("nacre")
 `../tools/format.ncr`、`../tools/format.d.ncr`、または
 `../tools/format/index.ncr` を探します。`use tools` は依存ルートの
 `index.ncr` を探します。相対 import と `std.*` は従来通り利用できます。
-安定した公開レジストリと lockfile はまだありません。将来の registry 依存は
-manifest にバージョン制約を記録し、解決済みの package 名、バージョン、ソース、
-チェックサムを lockfile に固定する方針です。
+`nacre --write-lock input.ncr` は manifest と同じディレクトリに `nacre.lock` を
+生成します。lockfile が存在する場合、path 依存の解決先と内容 fingerprint が
+コンパイル時に検証されます。公開 registry 依存はまだありません。
 
 ## 環境変数と引数
 

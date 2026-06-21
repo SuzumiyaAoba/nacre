@@ -46,6 +46,10 @@ pub fn compile_file_with_policy(
     compile_program(&program, policy).map_err(|error| attach_file_context(error, path))
 }
 
+pub fn write_lockfile_for(path: &Path) -> Result<(), CompileError> {
+    module_loader::write_lockfile_for(path)
+}
+
 fn compile_program(program: &Program, policy: &ExecutionPolicy) -> Result<String, CompileError> {
     let program = checker::type_check_and_lower_with_policy(program, policy)?;
     Ok(emitter::transpile_with_policy(&program, policy))

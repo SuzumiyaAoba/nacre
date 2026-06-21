@@ -61,3 +61,11 @@ return value.repeat(count)
 fn replace(value: String, search: String, replacement: String): String {
 return value.replace(search, replacement)
 }
+
+fn lines(value: String): [String] {
+return value.split("\n")
+}
+
+fn words(value: String): [String] {
+return value.trim().split(" ")
+}

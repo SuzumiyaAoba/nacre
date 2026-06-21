@@ -2,6 +2,10 @@ fn join(parts: ...String): String {
 return parts.join("/")
 }
 
+fn normalizeSlashes(value: String): String {
+return value.replace("//", "/")
+}
+
 fn isAbsolute(value: String): Bool {
 return value.isAbsolute()
 }

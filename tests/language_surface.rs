@@ -1,7 +1,7 @@
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nacre::{compile_source, compile_source_with_policy, ExecutionPolicy};
+use nacre::{compile_file, compile_source, compile_source_with_policy, ExecutionPolicy};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     let unique = SystemTime::now()
@@ -194,6 +194,42 @@ const base = path.basename()
 const dir = path.dirname()
 const stem = path.stem()
 const ext = path.extname()
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn compiles_added_standard_library_helpers() {
+    let dir = temp_dir("std-helpers");
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("main.ncr");
+    fs::write(
+        &input,
+        r#"
+use std.str
+use std.path
+const lines = str.lines("""a
+b""")
+const words = str.words("  a b  ")
+const normalized = path.normalizeSlashes("/tmp//nacre")
+"#,
+    )
+    .unwrap();
+    compile_file(&input).unwrap();
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn compiles_union_and_intersection_annotations() {
+    compile_source(
+        r#"
+const stringOrPath: String | Path = "input.txt"
+const bothTextPath: String & Path = "input.txt"
+fn stringify(value: String | Path): String {
+return value as String
+}
+const text = stringify(stringOrPath)
 "#,
     )
     .unwrap();

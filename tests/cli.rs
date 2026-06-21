@@ -113,6 +113,18 @@ const cmp = count >= 7
     assert!(invalid_stderr.contains("const value: Bool = 1"));
     assert!(invalid_stderr.contains("^"));
 
+    let json_invalid_run = Command::new(env!("CARGO_BIN_EXE_nacre"))
+        .arg("--diagnostic-format")
+        .arg("json")
+        .arg(&invalid_input)
+        .output()
+        .unwrap();
+    assert!(!json_invalid_run.status.success());
+    let json_stderr = String::from_utf8(json_invalid_run.stderr).unwrap();
+    assert!(json_stderr.contains("\"line\":1"));
+    assert!(json_stderr.contains("\"message\":\"type annotation mismatch"));
+    assert!(json_stderr.contains("\"source_line\":\"const value: Bool = 1\""));
+
     let missing_run = Command::new(env!("CARGO_BIN_EXE_nacre"))
         .arg(dir.join(format!("missing-{unique}.ncr")))
         .output()
@@ -141,6 +153,61 @@ const cmp = count >= 7
     assert!(String::from_utf8(write_error_run.stderr)
         .unwrap()
         .contains("failed to write"));
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cli_writes_and_validates_lockfile() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("nacre-lock-{unique}"));
+    let app = dir.join("app");
+    let tools = dir.join("tools");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&tools).unwrap();
+    fs::write(
+        app.join("nacre.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies.tools]\npath = \"../tools\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tools.join("format.ncr"),
+        "fn label(value: String): String {\nreturn \"tool:${value}\"\n}\n",
+    )
+    .unwrap();
+    let input = app.join("main.ncr");
+    fs::write(
+        &input,
+        "use tools.format\nconst result = format.label(\"ok\")\n",
+    )
+    .unwrap();
+
+    let write_lock = Command::new(env!("CARGO_BIN_EXE_nacre"))
+        .arg("--write-lock")
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(write_lock.status.success());
+    let lock = fs::read_to_string(app.join("nacre.lock")).unwrap();
+    assert!(lock.contains("[[package]]"));
+    assert!(lock.contains("name = \"tools\""));
+
+    fs::write(
+        tools.join("format.ncr"),
+        "fn label(value: String): String {\nreturn \"changed:${value}\"\n}\n",
+    )
+    .unwrap();
+    let stale_lock = Command::new(env!("CARGO_BIN_EXE_nacre"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(!stale_lock.status.success());
+    assert!(String::from_utf8(stale_lock.stderr)
+        .unwrap()
+        .contains("does not match"));
 
     fs::remove_dir_all(dir).unwrap();
 }

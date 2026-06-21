@@ -6,7 +6,7 @@
 ## 使用方法
 
 ```text
-nacre [--policy policy.toml] <input.ncr> [output.sh]
+nacre [--policy policy.toml] [--diagnostic-format text|json] [--write-lock] <input.ncr> [output.sh]
 ```
 
 リポジトリ内から実行する場合:
@@ -54,6 +54,16 @@ cargo run -- \
 `[dependencies.<name>] path = "..."` がある場合は、その manifest ディレクトリを
 基準にローカル path 依存を解決します。
 
+## lockfile を生成する
+
+```bash
+cargo run -- --write-lock app/main.ncr
+```
+
+`--write-lock` は `nacre.toml` と同じディレクトリに `nacre.lock` を生成します。
+lockfile が存在する場合、コンパイル時に path 依存の解決先と内容 fingerprint が
+検証されます。
+
 ## 終了ステータス
 
 コンパイルと任意のファイル書き込みに成功すると、CLI は正常終了します。
@@ -66,8 +76,8 @@ cargo run -- \
 - 出力ファイルの書き込みに失敗
 
 利用できる場合、エラーにはファイル名、行、列、該当するソース行、caret による範囲表示が
-含まれます。機械可読な診断が必要なツールは、CLI の表示を解析せず、Rust API の
-`CompileError` accessors を使用してください。
+含まれます。`--diagnostic-format json` を指定すると、単一診断を JSON オブジェクト
+として標準エラー出力へ書き込みます。
 
 ## ライブラリ API
 
@@ -80,5 +90,4 @@ use nacre::{compile_file, compile_file_with_policy};
 メモリ上のソースには `compile_source` と `compile_source_with_policy` を
 使用します。すべて `Result<String, CompileError>` を返します。`CompileError` は
 既存の `line()` と `message()` に加えて、`column()`、`end_line()`、
-`end_column()`、`source_name()`、`source_line()` を提供します。LSP や JSON 出力を
-追加する場合は、この構造化診断モデルを正本として扱います。
+`end_column()`、`source_name()`、`source_line()`、`to_json()` を提供します。
