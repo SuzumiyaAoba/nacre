@@ -2,6 +2,7 @@
 pub enum Statement {
     Use {
         path: Vec<String>,
+        alias: Option<String>,
     },
     Trait {
         name: String,
@@ -88,6 +89,7 @@ pub enum Statement {
     Block {
         body: Program,
     },
+    Defer(Box<Statement>),
     If {
         condition: Expr,
         then_branch: Program,
@@ -98,7 +100,7 @@ pub enum Statement {
         body: Program,
     },
     For {
-        name: String,
+        binding: ForBinding,
         iterable: Expr,
         body: Program,
     },
@@ -125,6 +127,12 @@ pub enum BindingPattern {
         names: Vec<String>,
         rest: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForBinding {
+    Name(String),
+    Pattern(BindingPattern),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,6 +244,11 @@ pub enum Expr {
     HasCommand(String),
     PathExists(Box<Expr>),
     Array(Vec<Expr>),
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
     Map(Vec<(Expr, Expr)>),
     Record(Vec<(String, Expr)>),
     RecordPattern(Vec<(String, Option<Expr>)>),
@@ -308,6 +321,10 @@ pub enum Expr {
     Call {
         name: String,
         args: Vec<Expr>,
+    },
+    NamedArg {
+        name: String,
+        value: Box<Expr>,
     },
     Value(String),
     Len(String),

@@ -347,15 +347,12 @@ fn expand_modules(
     let mut statements = Vec::new();
     let mut lines = Vec::new();
     for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
-        if let Statement::Use { path } = statement {
+        if let Statement::Use { path, alias } = statement {
             let module_path = resolve_module_path_with_deps(base_dir, path, *line, resolver)?;
             let module = parse_file_expanded(&module_path, resolver, seen)?;
-            let Some(namespace) = path.last() else {
-                return Err(CompileError::new(
-                    *line,
-                    "module path cannot be empty".to_string(),
-                ));
-            };
+            let namespace = alias.as_ref().or_else(|| path.last()).ok_or_else(|| {
+                CompileError::new(*line, "module path cannot be empty".to_string())
+            })?;
             let module = namespace::namespace_module(module, namespace);
             statements.extend_from_slice(module.statements());
             lines.extend_from_slice(module.statement_lines());

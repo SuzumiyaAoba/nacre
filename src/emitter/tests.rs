@@ -189,8 +189,8 @@ const copiedPerson = person
     assert!(bash.contains("readonly greet='greet'"));
     assert!(bash.contains("local __nacre_local_greet_1_prefix='Hello'"));
     assert!(bash.contains(
-            "local __nacre_return_value\n__nacre_return_value=\"${__nacre_local_greet_1_prefix}, ${__nacre_local_greet_0_who}\"\nprintf '%s\\n' \"$__nacre_return_value\"\nreturn 0"
-        ));
+        "local __nacre_return_value\n__nacre_return_value=\"$(printf '%s' \"$__nacre_local_greet_1_prefix\" ', ' \"$__nacre_local_greet_0_who\")\"\nprintf '%s\\n' \"$__nacre_return_value\"\nreturn 0"
+    ));
     assert!(bash.contains("readonly message=\"$(__nacre_call \"$greet\" \"$name\")\""));
     assert!(bash.contains("readonly custom=\"$(__nacre_call \"$greet\" \"$name\" 'Hi')\""));
     assert!(bash.contains("readonly firstUser=\"${names[0]}\""));
@@ -224,7 +224,7 @@ const copiedPerson = person
     assert!(bash.contains("readonly accountName=\"$account_name\""));
     assert!(bash.contains("readonly uid=42"));
     assert!(bash.contains("readonly rawUid=\"$uid\""));
-    assert!(bash.contains("readonly greeting=\"Hello, ${name}\""));
+    assert!(bash.contains("readonly greeting=\"$(printf '%s' 'Hello, ' \"$name\")\""));
     assert!(bash.contains("readonly rawGreeting='Hello, ${name}'"));
     assert!(
         bash.contains("count=$(awk -v __nacre_0=\"$count\" 'BEGIN { print ((__nacre_0 % 2)) }')")

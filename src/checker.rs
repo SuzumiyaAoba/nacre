@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use crate::policy::ExecutionPolicy;
 use crate::{
-    BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ImplMethod, MatchArm,
-    Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ForBinding, ImplMethod,
+    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 pub fn type_check(program: &Program) -> Result<(), CompileError> {
@@ -103,11 +103,36 @@ fn collect_declared_names(program: &Program, names: &mut HashSet<String>) {
                     collect_declared_names(else_branch, names);
                 }
             }
-            Statement::For { name, body, .. } => {
-                names.insert(name.clone());
+            Statement::For { binding, body, .. } => {
+                collect_for_binding_names(binding, names);
                 collect_declared_names(body, names);
             }
             _ => {}
+        }
+    }
+}
+
+fn collect_for_binding_names(binding: &ForBinding, names: &mut HashSet<String>) {
+    match binding {
+        ForBinding::Name(name) => {
+            names.insert(name.clone());
+        }
+        ForBinding::Pattern(pattern) => collect_binding_pattern_names(pattern, names),
+    }
+}
+
+fn collect_binding_pattern_names(pattern: &BindingPattern, names: &mut HashSet<String>) {
+    match pattern {
+        BindingPattern::Tuple(values) => names.extend(values.iter().cloned()),
+        BindingPattern::Record(fields) => {
+            names.extend(fields.iter().map(|(_, binding)| binding.clone()));
+        }
+        BindingPattern::Array {
+            names: values,
+            rest,
+        } => {
+            names.extend(values.iter().cloned());
+            names.extend(rest.iter().cloned());
         }
     }
 }
@@ -277,6 +302,7 @@ fn collect_statement_function_refs(
         | Statement::Return(expr) => collect_expr_function_refs(expr, functions, refs),
         Statement::Destructure { expr, .. } => collect_expr_function_refs(expr, functions, refs),
         Statement::Block { body } => collect_program_function_refs(body, functions, refs),
+        Statement::Defer(statement) => collect_statement_function_refs(statement, functions, refs),
         Statement::If {
             condition,
             then_branch,
@@ -328,6 +354,7 @@ fn collect_expr_function_refs(
             }
             collect_exprs_function_refs(args, functions, refs);
         }
+        Expr::NamedArg { value, .. } => collect_expr_function_refs(value, functions, refs),
         Expr::Ident(name) | Expr::Closure { name, .. } if functions.contains(name) => {
             refs.insert(name.clone());
         }
@@ -406,6 +433,10 @@ fn collect_expr_function_refs(
         | Expr::Array(args)
         | Expr::Tuple(args)
         | Expr::Variant { args, .. } => collect_exprs_function_refs(args, functions, refs),
+        Expr::Range { start, end, .. } => {
+            collect_expr_function_refs(start, functions, refs);
+            collect_expr_function_refs(end, functions, refs);
+        }
         Expr::Map(entries) => {
             for (key, value) in entries {
                 collect_expr_function_refs(key, functions, refs);
@@ -717,6 +748,12 @@ impl TypeChecker {
             Statement::Block { body } => {
                 *body = self.expand_nested_try_program(body);
             }
+            Statement::Defer(statement) => {
+                **statement = self
+                    .expand_nested_try_statement(statement)
+                    .pop()
+                    .expect("defer statement expansion preserves a statement");
+            }
             Statement::If {
                 condition,
                 then_branch,
@@ -836,6 +873,13 @@ impl TypeChecker {
                 for value in values {
                     self.extract_nested_try_results(value, false, prefix);
                 }
+            }
+            Expr::Range { start, end, .. } => {
+                self.extract_nested_try_results(start, false, prefix);
+                self.extract_nested_try_results(end, false, prefix);
+            }
+            Expr::NamedArg { value, .. } => {
+                self.extract_nested_try_results(value, false, prefix);
             }
             Expr::Map(entries) => {
                 for (key, value) in entries {
@@ -1411,6 +1455,16 @@ impl TypeChecker {
                     self.lower_expr_expected(expr, &expected, line)?,
                 ))
             }
+            Statement::Defer(statement) => {
+                let lowered = self.check_and_lower_statement(statement, line)?;
+                if !statement_flow(&lowered).falls_through {
+                    return Err(CompileError::new(
+                        line,
+                        "defer body must not exit control flow".to_string(),
+                    ));
+                }
+                Ok(Statement::Defer(Box::new(lowered)))
+            }
             Statement::Block { body } => {
                 let mut body_checker = self.clone();
                 Ok(Statement::Block {
@@ -1448,7 +1502,7 @@ impl TypeChecker {
                 Ok(Statement::While { condition, body })
             }
             Statement::For {
-                name,
+                binding,
                 iterable,
                 body,
             } => {
@@ -1465,10 +1519,10 @@ impl TypeChecker {
                 let iterable = self.lower_expr(iterable, line)?;
                 let mut body_checker = self.clone();
                 body_checker.loop_depth += 1;
-                body_checker.define(name, *element_ty, false, line)?;
+                body_checker.define_for_binding(binding, &element_ty, line)?;
                 let body = body_checker.check_and_lower_program(body)?;
                 Ok(Statement::For {
-                    name: name.clone(),
+                    binding: binding.clone(),
                     iterable,
                     body,
                 })
@@ -1609,6 +1663,16 @@ impl TypeChecker {
             Statement::Break => self.check_loop_control("break", line),
             Statement::Continue => self.check_loop_control("continue", line),
             Statement::Return(expr) => self.check_return(expr, line),
+            Statement::Defer(statement) => {
+                self.check_statement(statement, line)?;
+                if !statement_flow(statement).falls_through {
+                    return Err(CompileError::new(
+                        line,
+                        "defer body must not exit control flow".to_string(),
+                    ));
+                }
+                Ok(())
+            }
             Statement::Block { body } => {
                 let mut body_checker = self.clone();
                 body_checker.check_program(body)
@@ -1620,10 +1684,10 @@ impl TypeChecker {
             } => self.check_if(condition, then_branch, else_branch.as_ref(), line),
             Statement::While { condition, body } => self.check_while(condition, body, line),
             Statement::For {
-                name,
+                binding,
                 iterable,
                 body,
-            } => self.check_for(name, iterable, body, line),
+            } => self.check_for(binding, iterable, body, line),
         }
     }
 
@@ -1658,7 +1722,7 @@ impl TypeChecker {
 
     fn check_for(
         &self,
-        name: &str,
+        binding: &ForBinding,
         iterable: &Expr,
         body: &Program,
         line: usize,
@@ -1676,7 +1740,7 @@ impl TypeChecker {
 
         let mut body_checker = self.clone();
         body_checker.loop_depth += 1;
-        body_checker.define(name, *element_ty, false, line)?;
+        body_checker.define_for_binding(binding, &element_ty, line)?;
         body_checker.check_program(body)
     }
 
@@ -2649,6 +2713,20 @@ impl TypeChecker {
         }
     }
 
+    fn define_for_binding(
+        &mut self,
+        binding: &ForBinding,
+        element_ty: &Type,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        match binding {
+            ForBinding::Name(name) => self.define(name, element_ty.clone(), false, line),
+            ForBinding::Pattern(pattern) => {
+                self.define_destructure(pattern, element_ty, false, line)
+            }
+        }
+    }
+
     fn ensure_destructurable_source(&self, expr: &Expr, line: usize) -> Result<(), CompileError> {
         match expr {
             Expr::Array(_)
@@ -3157,11 +3235,33 @@ impl TypeChecker {
                         });
                     }
                 }
+                if !self.functions.contains_key(name) {
+                    if let Some(lowered_name) = self.resolve_unscoped_method_call(name, args, line)?
+                    {
+                        return Ok(Expr::Call {
+                            name: lowered_name.clone(),
+                            args: self.lower_call_args(&lowered_name, args, line)?,
+                        });
+                    }
+                }
                 Ok(Expr::Call {
                     name: name.clone(),
                     args: self.lower_call_args(name, args, line)?,
                 })
             }
+            Expr::NamedArg { .. } => Err(CompileError::new(
+                line,
+                "named arguments are only valid inside function calls".to_string(),
+            )),
+            Expr::Range {
+                start,
+                end,
+                inclusive,
+            } => Ok(Expr::Range {
+                start: Box::new(self.lower_expr(start, line)?),
+                end: Box::new(self.lower_expr(end, line)?),
+                inclusive: *inclusive,
+            }),
             Expr::Array(values) => Ok(Expr::Array(
                 values
                     .iter()
@@ -3987,6 +4087,8 @@ impl TypeChecker {
                 let qualified = format!("{name}.{field}");
                 if self.functions.contains_key(&qualified) {
                     Ok(Expr::Ident(qualified))
+                } else if self.bindings.contains_key(&module_binding_name(name, field)) {
+                    Ok(Expr::Ident(module_binding_name(name, field)))
                 } else {
                     Ok(expr.clone())
                 }
@@ -4001,11 +4103,8 @@ impl TypeChecker {
         args: &[Expr],
         line: usize,
     ) -> Result<Vec<Expr>, CompileError> {
-        if let Some(sig) = self
-            .functions
-            .get(name)
-            .filter(|sig| sig.type_params.is_empty())
-        {
+        if let Some(sig) = self.functions.get(name) {
+            let args = self.normalize_call_args(name, args, sig, line)?;
             return args
                 .iter()
                 .enumerate()
@@ -4016,6 +4115,12 @@ impl TypeChecker {
                         .unwrap_or_else(|| self.lower_expr(arg, line))
                 })
                 .collect();
+        }
+        if args.iter().any(|arg| matches!(arg, Expr::NamedArg { .. })) {
+            return Err(CompileError::new(
+                line,
+                format!("function value `{name}` does not support named arguments"),
+            ));
         }
         if let Some(Binding {
             ty: Type::Function(params, _),
@@ -4034,6 +4139,114 @@ impl TypeChecker {
                 .collect();
         }
         args.iter().map(|arg| self.lower_expr(arg, line)).collect()
+    }
+
+    fn normalize_call_args(
+        &self,
+        name: &str,
+        args: &[Expr],
+        sig: &FunctionSig,
+        line: usize,
+    ) -> Result<Vec<Expr>, CompileError> {
+        let has_named = args.iter().any(|arg| matches!(arg, Expr::NamedArg { .. }));
+        if !has_named {
+            return Ok(args.to_vec());
+        }
+
+        let has_rest = sig.params.last().is_some_and(|param| param.variadic);
+        let fixed_len = if has_rest {
+            sig.params.len() - 1
+        } else {
+            sig.params.len()
+        };
+        let mut values = vec![None; fixed_len];
+        let mut next_positional = 0;
+        let mut seen_named = HashSet::new();
+        let mut seen_any_named = false;
+
+        for arg in args {
+            match arg {
+                Expr::NamedArg {
+                    name: arg_name,
+                    value,
+                } => {
+                    seen_any_named = true;
+                    let Some(index) = sig.params[..fixed_len]
+                        .iter()
+                        .position(|param| param.name == *arg_name)
+                    else {
+                        return Err(CompileError::new(
+                            line,
+                            format!("function `{name}` has no parameter `{arg_name}`"),
+                        ));
+                    };
+                    if !seen_named.insert(arg_name.clone()) || values[index].is_some() {
+                        return Err(CompileError::new(
+                            line,
+                            format!("argument `{arg_name}` for function `{name}` was provided more than once"),
+                        ));
+                    }
+                    values[index] = Some((**value).clone());
+                }
+                value => {
+                    if seen_any_named {
+                        return Err(CompileError::new(
+                            line,
+                            format!(
+                                "positional arguments for function `{name}` must appear before named arguments"
+                            ),
+                        ));
+                    }
+                    while next_positional < fixed_len && values[next_positional].is_some() {
+                        next_positional += 1;
+                    }
+                    if next_positional >= fixed_len {
+                        if has_rest {
+                            return Err(CompileError::new(
+                                line,
+                                format!(
+                                    "positional rest arguments for function `{name}` must appear before named arguments"
+                                ),
+                            ));
+                        }
+                        return Err(CompileError::new(
+                            line,
+                            format!(
+                                "function `{name}` expects at most {fixed_len} arguments before named arguments"
+                            ),
+                        ));
+                    }
+                    values[next_positional] = Some(value.clone());
+                    next_positional += 1;
+                }
+            }
+        }
+
+        let mut normalized = Vec::with_capacity(fixed_len);
+        for (index, value) in values.into_iter().enumerate() {
+            if let Some(value) = value {
+                normalized.push((value, true));
+            } else if let Some(default) = &sig.params[index].default {
+                normalized.push((default.clone(), false));
+            } else {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "missing argument `{}` for function `{name}`",
+                        sig.params[index].name
+                    ),
+                ));
+            }
+        }
+
+        while normalized
+            .last()
+            .zip(sig.params.get(normalized.len().saturating_sub(1)))
+            .is_some_and(|((_, explicit), param)| !explicit && param.default.is_some())
+        {
+            normalized.pop();
+        }
+        Ok(normalized.into_iter().map(|(value, _)| value).collect())
     }
 
     fn resolve_method_name(
@@ -4069,6 +4282,42 @@ impl TypeChecker {
         Err(CompileError::new(
             line,
             format!("undefined function `{method}`"),
+        ))
+    }
+
+    fn resolve_unscoped_method_call(
+        &self,
+        method: &str,
+        args: &[Expr],
+        line: usize,
+    ) -> Result<Option<String>, CompileError> {
+        if self.functions.contains_key(method) {
+            return Ok(Some(method.to_string()));
+        }
+        let Some(receiver) = args.first() else {
+            return Ok(None);
+        };
+        let receiver_ty = self.check_expr(receiver, line)?;
+        let Some(candidates) = self
+            .method_impls
+            .get(&(method.to_string(), receiver_ty.name()))
+        else {
+            return Ok(None);
+        };
+        if candidates.len() == 1 {
+            return Ok(Some(candidates[0].1.clone()));
+        }
+        let traits = candidates
+            .iter()
+            .map(|(trait_name, _)| trait_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(CompileError::new(
+            line,
+            format!(
+                "ambiguous method `{method}` for {}; use one of: {traits}",
+                receiver_ty.name()
+            ),
         ))
     }
 
@@ -4173,6 +4422,23 @@ impl TypeChecker {
             Expr::JsonParse { value } => self.check_json_parse(value, line),
             Expr::JsonStringify { name } => self.check_json_stringify(name, line),
             Expr::JsonStringifyValue { value } => self.check_json_stringify_value(value, line),
+            Expr::Range { start, end, .. } => {
+                let start_ty = self.check_expr(start, line)?;
+                if !self.is_assignable(&Type::Int, &start_ty, start) {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type mismatch: expected Int, found {}", start_ty.name()),
+                    ));
+                }
+                let end_ty = self.check_expr(end, line)?;
+                if !self.is_assignable(&Type::Int, &end_ty, end) {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type mismatch: expected Int, found {}", end_ty.name()),
+                    ));
+                }
+                Ok(Type::Array(Box::new(Type::Int)))
+            }
             Expr::Array(values) => self.check_array(values, line),
             Expr::Map(entries) => self.check_map(entries, line),
             Expr::Record(fields) => self.check_record(fields, line),
@@ -4233,6 +4499,10 @@ impl TypeChecker {
                 self.check_variant(name, args, line)
             }
             Expr::Call { name, args } => self.check_call(name, args, line),
+            Expr::NamedArg { .. } => Err(CompileError::new(
+                line,
+                "named arguments are only valid inside function calls".to_string(),
+            )),
             Expr::Value(name) => self.check_value_access(name, line),
             Expr::Len(name) | Expr::StringLen(name) => self.check_len(name, line),
             Expr::ArrayLenValue(value) => self
@@ -7243,6 +7513,9 @@ impl TypeChecker {
             if let Some(sig) = self.functions.get(&qualified) {
                 return Ok(sig.function_type());
             }
+            if let Some(binding) = self.lookup_binding(&module_binding_name(name, field)) {
+                return Ok(binding.ty);
+            }
             return Err(CompileError::new(
                 line,
                 format!("undefined variable `{name}`"),
@@ -7348,10 +7621,14 @@ impl TypeChecker {
             }
         }
         let Some(sig) = self.functions.get(name) else {
+            if let Some(lowered_name) = self.resolve_unscoped_method_call(name, args, line)? {
+                return self.check_call(&lowered_name, args, line);
+            }
             return self.check_function_value_call(name, args, line);
         };
+        let args = self.normalize_call_args(name, args, sig, line)?;
         if !sig.type_params.is_empty() {
-            return self.check_generic_call(name, sig, args, line);
+            return self.check_generic_call(name, sig, &args, line);
         }
         let min_args = sig
             .params
@@ -8548,6 +8825,17 @@ impl TypeChecker {
             return true;
         }
         match (target, actual) {
+            (Type::String, actual) => matches!(
+                actual,
+                Type::Int
+                    | Type::Float
+                    | Type::Bool
+                    | Type::String
+                    | Type::Path
+                    | Type::ExitCode
+                    | Type::Unit
+                    | Type::Generic(_)
+            ),
             (Type::Brand { base, .. }, _) => self.is_assignable(base, actual, expr),
             (_, Type::Brand { base, .. }) => self.is_assignable(target, base, expr),
             _ => false,
@@ -8599,6 +8887,7 @@ fn statement_uses_process_args(statement: &Statement) -> bool {
         Statement::Block { body } | Statement::While { body, .. } | Statement::For { body, .. } => {
             program_uses_process_args(body)
         }
+        Statement::Defer(statement) => statement_uses_process_args(statement),
         Statement::If {
             condition,
             then_branch,
@@ -8836,6 +9125,10 @@ fn expr_uses_process_args(expr: &Expr) -> bool {
         | Expr::Variant { args: values, .. }
         | Expr::Call { args: values, .. }
         | Expr::AllowedCommand { args: values, .. } => values.iter().any(expr_uses_process_args),
+        Expr::Range { start, end, .. } => {
+            expr_uses_process_args(start) || expr_uses_process_args(end)
+        }
+        Expr::NamedArg { value, .. } => expr_uses_process_args(value),
         Expr::Map(entries) => entries
             .iter()
             .any(|(key, value)| expr_uses_process_args(key) || expr_uses_process_args(value)),
@@ -8887,6 +9180,10 @@ fn argument_count(count: usize) -> String {
         1 => "1 argument".to_string(),
         other => format!("{other} arguments"),
     }
+}
+
+fn module_binding_name(module: &str, name: &str) -> String {
+    format!("{module}_{name}")
 }
 
 #[cfg(test)]

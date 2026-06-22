@@ -1,6 +1,6 @@
 use crate::{
-    BinaryOp, BindingPattern, CompileError, DoStep, Expr, ImplMethod, MatchArm, Param, Program,
-    Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplMethod, MatchArm, Param,
+    Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 #[derive(Debug)]
@@ -655,7 +655,6 @@ fn validate_expr(expr: &Expr, line: usize) -> Result<(), CompileError> {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn parse_expr(input: &str, line: usize) -> Result<Expr, CompileError> {
     let expr = nacre_grammar::expression_root(input).map_err(|error| {
         CompileError::new(
@@ -762,11 +761,53 @@ fn decode_escaped(value: &str) -> String {
     result
 }
 
+fn string_expr(value: String) -> Result<Expr, String> {
+    if !value.contains("${") {
+        return Ok(Expr::String(value));
+    }
+
+    let mut parts = Vec::new();
+    let mut rest = value.as_str();
+    while let Some(start) = rest.find("${") {
+        if start > 0 {
+            parts.push(Expr::String(rest[..start].to_string()));
+        }
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find('}') else {
+            return Ok(Expr::String(value));
+        };
+        let source = &after_start[..end];
+        let expr =
+            parse_expr(source, 1).map_err(|_| "string interpolation expression".to_string())?;
+        parts.push(Expr::Cast {
+            expr: Box::new(expr),
+            ty: Type::String,
+        });
+        rest = &after_start[end + 1..];
+    }
+    if !rest.is_empty() {
+        parts.push(Expr::String(rest.to_string()));
+    }
+
+    let mut parts = parts.into_iter();
+    let Some(first) = parts.next() else {
+        return Ok(Expr::String(String::new()));
+    };
+    Ok(parts.fold(first, |left, right| binary(left, BinaryOp::Concat, right)))
+}
+
 fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
     Expr::Binary {
         left: Box::new(left),
         op,
         right: Box::new(right),
+    }
+}
+
+fn compound_assignment(name: String, op: BinaryOp, right: Expr) -> Statement {
+    Statement::Assign {
+        name: name.clone(),
+        expr: binary(Expr::Ident(name), op, right),
     }
 }
 
@@ -1342,10 +1383,13 @@ fn method_expr(receiver: Expr, method: String, mut args: Vec<Expr>) -> Result<Ex
             );
         }
         _ => {
-            let Some(name) = qualified_name(&receiver) else {
-                return Err("unsupported method receiver");
-            };
-            return Ok(call_expr(format!("{name}.{method}"), args));
+            if let Some(name) = qualified_name(&receiver) {
+                return Ok(call_expr(format!("{name}.{method}"), args));
+            }
+            let mut source_args = Vec::with_capacity(args.len() + 1);
+            source_args.push(receiver);
+            source_args.extend(args);
+            return Ok(call_expr(method, source_args));
         }
     };
     Ok(result)
@@ -1612,7 +1656,7 @@ peg::parser! {
 
         rule language_keyword()
             = ("as" / "async" / "await" / "break" / "const" / "continue" /
-               "do" / "else" / "export" / "false" / "fn" / "fn!" / "for" /
+               "defer" / "do" / "else" / "export" / "false" / "fn" / "fn!" / "for" /
                "if" / "impl" / "in" / "let" / "match" / "newtype" / "raw" /
                "requireOneOf" / "require" / "return" / "spawn" / "trait" /
                "true" / "try" / "type" / "use" / "while") !identifier_continue()
@@ -1651,6 +1695,7 @@ peg::parser! {
             / if_statement()
             / while_statement()
             / for_statement()
+            / defer_statement()
             / block_statement()
             / use_statement()
             / newtype_statement()
@@ -1833,16 +1878,25 @@ peg::parser! {
             { Statement::While { condition, body } }
 
         rule for_statement() -> Statement
-            = "for" hws1() name:identifier() hws1() "in" hws1()
+            = "for" hws1() binding:for_binding() hws1() "in" hws1()
               iterable:expression() hws() "{" body:block_body() "}"
-            { Statement::For { name, iterable, body } }
+            { Statement::For { binding, iterable, body } }
+
+        rule for_binding() -> ForBinding
+            = pattern:binding_pattern() { ForBinding::Pattern(pattern) }
+            / name:identifier() { ForBinding::Name(name) }
 
         rule block_statement() -> Statement
             = "{" body:block_body() "}" { Statement::Block { body } }
 
+        rule defer_statement() -> Statement
+            = "defer" hws1() statement:(block_statement() / expression_statement_rule())
+            { Statement::Defer(Box::new(statement)) }
+
         rule use_statement() -> Statement
             = "use" hws1() path:(identifier() ++ (hws() "." hws()))
-            { Statement::Use { path } }
+              alias:(hws1() "as" hws1() name:identifier() { name })?
+            { Statement::Use { path, alias } }
 
         rule newtype_statement() -> Statement
             = "newtype" hws1() name:type_identifier() hws() "=" hws() base:type_expr()
@@ -1956,8 +2010,24 @@ peg::parser! {
             }
 
         rule assignment_statement() -> Statement
-            = !language_keyword() name:identifier() hws() "=" !"=" hws() value:expression()
+            = !language_keyword() name:identifier() hws() op:compound_assignment_op()
+              hws() value:expression()
+                { super::compound_assignment(name, op, value) }
+            / !language_keyword() name:identifier() hws() "=" !"=" hws() value:expression()
             { Statement::Assign { name, expr: value } }
+
+        rule compound_assignment_op() -> BinaryOp
+            = "++=" { BinaryOp::Concat }
+            / "<<=" { BinaryOp::Shl }
+            / ">>=" { BinaryOp::Shr }
+            / "+=" { BinaryOp::Add }
+            / "-=" { BinaryOp::Sub }
+            / "*=" { BinaryOp::Mul }
+            / "/=" { BinaryOp::Div }
+            / "%=" { BinaryOp::Mod }
+            / "&=" { BinaryOp::BitAnd }
+            / "|=" { BinaryOp::BitOr }
+            / "^=" { BinaryOp::BitXor }
 
         rule expression_statement_rule() -> Statement
             = value:expression() { super::expression_statement(value) }
@@ -2050,6 +2120,21 @@ peg::parser! {
                 )
             }
             --
+            left:(@) ws() "..=" ws() right:@ {
+                Expr::Range {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: true,
+                }
+            }
+            left:(@) ws() ".." !"." ws() right:@ {
+                Expr::Range {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: false,
+                }
+            }
+            --
             left:(@) ws() "||" ws() right:@ { super::binary(left, BinaryOp::Or, right) }
             --
             left:(@) ws() "&&" ws() right:@ { super::binary(left, BinaryOp::And, right) }
@@ -2097,10 +2182,10 @@ peg::parser! {
             {? super::apply_postfix(value, suffixes) }
 
         rule postfix_suffix() -> Postfix
-            = ws() "(" ws() args:(expression() ** comma()) ws() ")"
+            = ws() "(" ws() args:(call_arg() ** comma()) ws() ")"
                 { Postfix::Call(args) }
             / ws() "." ws() method:identifier() ws() "(" ws()
-              args:(expression() ** comma()) ws() ")"
+              args:(call_arg() ** comma()) ws() ")"
                 { Postfix::Method(method, args) }
             / ws() "[" ws() index:expression() ws() "]" { Postfix::Index(index) }
             / ws() "." ws() "_" field:$(['1'..='9']['0'..='9']*)
@@ -2143,6 +2228,11 @@ peg::parser! {
             }
             / "(" ws() value:expression() ws() ")" { value }
             / !language_keyword() !("env" ws() ".") name:identifier() { Expr::Ident(name) }
+
+        rule call_arg() -> Expr
+            = name:identifier() ws() "=" !"=" ws() value:expression()
+                { Expr::NamedArg { name, value: Box::new(value) } }
+            / expression()
 
         rule do_expr() -> Expr
             = "do" ws() "{" ws() items:(do_item() ** do_separator()) ws() "}"
@@ -2240,19 +2330,19 @@ peg::parser! {
             {? i64::from_str_radix(value.trim_start_matches('-').trim_start_matches("0b"), 2)
                 .map(|number| Expr::Int(if value.starts_with('-') { -number } else { number }))
                 .or(Err("binary integer")) }
-            / value:$("-"? ['0'..='9']+) !("." / identifier_continue())
+            / value:$("-"? ['0'..='9']+) !("." !"." / identifier_continue())
                 {? value.parse().map(Expr::Int).or(Err("integer")) }
 
         rule float() -> Expr
-            = value:$("-"? ['0'..='9']+ "." ['0'..='9']+)
+            = value:$("-"? ['0'..='9']+ "." !"." ['0'..='9']+)
               !identifier_continue() { Expr::Float(value.to_string()) }
 
         rule triple_string() -> Expr
             = "\"\"\"" value:$((!"\"\"\"" [_])*) "\"\"\""
-                { Expr::String(value.to_string()) }
+                {? super::string_expr(value.to_string()).or(Err("string")) }
 
         rule string() -> Expr
-            = value:string_value() { Expr::String(value) }
+            = value:string_value() {? super::string_expr(value).or(Err("string")) }
 
         rule string_value() -> String
             = "\"" value:$((("\\" [_]) / (!"\"" [_]))*) "\""

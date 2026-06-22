@@ -15,6 +15,7 @@ Nacre のソースは UTF-8 テキストで、`.ncr` 拡張子を使います。
 const project = "Nacre"
 let revision = 1
 revision = revision + 1
+revision += 1
 ```
 
 ブロックは波括弧で囲みます。インデントは構文上の意味を持ちませんが、この
@@ -29,6 +30,7 @@ revision = revision + 1
 const name: String = "Nacre"
 let count: Int = 1
 count = count + 1
+count += 1
 
 const enabled: Bool = true
 const ratio: Float = 1.5
@@ -79,6 +81,9 @@ const [first, second, ...rest] = names
 ```nacre
 const name = "Nacre"
 const greeting = "こんにちは、${name}"
+const values = ["a", "b"]
+const indexed = "first: ${values[0]}"
+const count = "items: ${values.len() + 1}"
 const message = """
 1行目
 2行目
@@ -86,6 +91,8 @@ const message = """
 const literal = r"バックスラッシュ \n をそのまま保持"
 ```
 
+文字列補間では、変数、配列 index、レコード field、タプル field、演算子、
+メソッド呼び出しを含む式を使えます。
 文字列と Path 値には、`.len()`、`.isEmpty()`、`.slice(...)`、
 `.contains(...)`、`.trim()`、`.replace(...)`、`.basename()`、
 `.dirname()`、`.stem()`、`.extname()` などの操作があります。
@@ -103,6 +110,7 @@ fn firstLabel(prefix: String, values: ...String): String {
 
 const defaultGreeting = greet("Nacre")
 const customGreeting = greet("Nacre", "Hi")
+const namedGreeting = greet(prefix = "Hi", name = "Nacre")
 ```
 
 ジェネリック関数、トレイト境界、関数値、式ラムダ、UFCS 形式の呼び出しに
@@ -119,7 +127,11 @@ fn decorate(value: String): String {
 
 const names = ["Ada", "Grace"]
 const decorated = names.map(decorate)
+const decoratedValue = ("Na" ++ "cre").decorate()
 ```
+
+関数呼び出しでは、位置引数の後に名前付き引数を指定できます。名前付き引数の順序は
+自由で、省略したパラメータにデフォルト値があればそれが使われます。
 
 ## Option と Result
 
@@ -153,6 +165,14 @@ for name in ["Ada", "Grace"] {
     const length = name.len()
 }
 
+for index in 0..3 {
+    const copy = index
+}
+
+for (name, score) in [("Ada", 10), ("Grace", 12)] {
+    const label = "${name}: ${score}"
+}
+
 const label = if count == 0 {
     "done"
 } else {
@@ -161,9 +181,15 @@ const label = if count == 0 {
 ```
 
 `if`、`else if`、`else`、`while`、`for`、`break`、`continue` に
-対応します。単独のブロックは静的なスコープを作ります。`break` と
-`continue` はループ内でのみ使用でき、無条件に制御が移った後の文は
-到達不能として拒否されます。
+対応します。`for` は配列と整数 range を反復できます。`start..end` は終端を含まず、
+`start..=end` は終端を含みます。降順の range にも対応します。単独のブロックは
+静的なスコープを作ります。ループ束縛では、配列内のタプル、レコード、配列要素を
+destructure できます。`break` と `continue` はループ内でのみ使用でき、無条件に
+制御が移った後の文は到達不能として拒否されます。
+
+`defer` は、現在のブロックを抜けるときに実行する式文またはブロックを登録します。
+defer 文は通常のスコープ終了、`return`、`break`、`continue` の直前に
+後入れ先出しで実行されます。defer 本体から制御フローを抜けることはできません。
 
 `Unit` 以外を返す関数では、すべての経路が値を返す必要があります。関数末尾の
 式は暗黙の return となり、それ以前の分岐が明示的に return する場合も同様です。
@@ -235,6 +261,14 @@ use tools.format
 const label = format.label("nacre")
 ```
 
+`as` を使うと、短いローカル名前空間でモジュールを import できます。
+
+```nacre
+use tools.format as fmt
+
+const shortLabel = fmt.label("nacre")
+```
+
 依存名は `use` の先頭セグメントになります。`use tools.format` は
 `../tools/format.ncr`、`../tools/format.d.ncr`、または
 `../tools/format/index.ncr` を探します。`use tools` は依存ルートの
@@ -286,6 +320,9 @@ const stderr: String = inspected.stderr
 - ビット演算: `&`、`|`、`^`、`~`、`<<`、`>>`
 - Applicative / Monad の別名: `<$>`、`<*>`、`>>=`、`<|`
 - 既定値の取り出し: `??`
+
+可変バインディングでは、`+=`、`-=`、`*=`、`/=`、`%=`、`++=`、
+`&=`、`|=`、`^=`、`<<=`、`>>=` の複合代入も使用できます。
 
 丸括弧で評価順序を指定できます。
 

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{BindingPattern, ClosureCapture, Expr, MatchArm, Param, Program, Statement};
+use crate::{
+    BindingPattern, ClosureCapture, Expr, ForBinding, MatchArm, Param, Program, Statement,
+};
 
 #[derive(Debug)]
 pub(super) struct LocalMangler {
@@ -269,6 +271,11 @@ pub(super) fn mangle_local_statement(
                 body: mangle_local_program(body, mangler, &body_locals),
             }
         }
+        Statement::Defer(statement) => Statement::Defer(Box::new(mangle_local_statement(
+            statement,
+            mangler,
+            local_names,
+        ))),
         Statement::While { condition, body } => {
             let body_locals = local_names.clone();
             Statement::While {
@@ -277,15 +284,14 @@ pub(super) fn mangle_local_statement(
             }
         }
         Statement::For {
-            name,
+            binding,
             iterable,
             body,
         } => {
             let mut body_locals = local_names.clone();
-            let mangled_name = mangler.fresh(name);
-            body_locals.insert(name.clone(), mangled_name.clone());
+            let mangled_binding = mangle_local_for_binding(binding, mangler, &mut body_locals);
             Statement::For {
-                name: mangled_name,
+                binding: mangled_binding,
                 iterable: mangle_local_expr(iterable, local_names),
                 body: mangle_local_program(body, mangler, &body_locals),
             }
@@ -327,6 +333,21 @@ fn mangle_local_pattern(
                 })
                 .collect(),
         ),
+    }
+}
+
+fn mangle_local_for_binding(
+    binding: &ForBinding,
+    mangler: &mut LocalMangler,
+    local_names: &mut HashMap<String, String>,
+) -> ForBinding {
+    match binding {
+        ForBinding::Name(name) => {
+            ForBinding::Name(mangle_local_binding_name(name, mangler, local_names))
+        }
+        ForBinding::Pattern(pattern) => {
+            ForBinding::Pattern(mangle_local_pattern(pattern, mangler, local_names))
+        }
     }
 }
 
@@ -439,6 +460,15 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
         },
         Expr::JsonStringifyValue { value } => Expr::JsonStringifyValue {
             value: Box::new(mangle_local_expr(value, local_names)),
+        },
+        Expr::Range {
+            start,
+            end,
+            inclusive,
+        } => Expr::Range {
+            start: Box::new(mangle_local_expr(start, local_names)),
+            end: Box::new(mangle_local_expr(end, local_names)),
+            inclusive: *inclusive,
         },
         Expr::Array(values) => Expr::Array(
             values
@@ -609,6 +639,10 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
                 .iter()
                 .map(|arg| mangle_local_expr(arg, local_names))
                 .collect(),
+        },
+        Expr::NamedArg { name, value } => Expr::NamedArg {
+            name: name.clone(),
+            value: Box::new(mangle_local_expr(value, local_names)),
         },
         Expr::Value(name) => Expr::Value(mangle_local_name(name, local_names)),
         Expr::Len(name) => Expr::Len(mangle_local_name(name, local_names)),
@@ -991,13 +1025,27 @@ pub(super) fn mangle_shell_interpolations(
             out.push_str(after_start);
             return out;
         };
-        let name = &after_start[..end];
-        out.push_str(&mangle_local_name(name, local_names));
+        let value = &after_start[..end];
+        out.push_str(&mangle_interpolation_ref(value, local_names));
         out.push('}');
         rest = &after_start[end + 1..];
     }
     out.push_str(rest);
     out
+}
+
+fn mangle_interpolation_ref(value: &str, local_names: &HashMap<String, String>) -> String {
+    if let Some((base, index)) = value
+        .strip_suffix(']')
+        .and_then(|value| value.split_once('['))
+    {
+        return format!("{}[{index}]", mangle_local_name(base, local_names));
+    }
+    if let Some((base, field)) = value.split_once('.') {
+        let separator = if field.starts_with('_') { "" } else { "_" };
+        return format!("{}{separator}{field}", mangle_local_name(base, local_names));
+    }
+    mangle_local_name(value, local_names)
 }
 
 pub(super) fn sanitize_shell_ident(name: &str) -> String {

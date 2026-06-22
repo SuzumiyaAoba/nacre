@@ -153,6 +153,7 @@ pub(super) fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(Strin
         | Expr::HasCommand(_)
         | Expr::PathExists(_)
         | Expr::Array(_)
+        | Expr::Range { .. }
         | Expr::Map(_)
         | Expr::Record(_)
         | Expr::RecordPattern(_)
@@ -276,6 +277,7 @@ pub(super) fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(Strin
             out.push_str(&name);
         }
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
+        Expr::NamedArg { .. } => unreachable!("named arguments are lowered before emission"),
         Expr::Closure { name, captures } => emit_closure(out, name, captures),
         Expr::Lambda { .. } => unreachable!("lambdas are lowered before emission"),
     }

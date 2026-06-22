@@ -35,6 +35,10 @@ fn collect_function_names(program: &Program, functions: &mut HashSet<String>) {
                 }
             }
             Statement::Block { body } => collect_function_names(body, functions),
+            Statement::Defer(statement) => collect_function_names(
+                &Program::new(vec![statement.as_ref().clone()], vec![1]),
+                functions,
+            ),
             Statement::While { body, .. } | Statement::For { body, .. } => {
                 collect_function_names(body, functions);
             }
@@ -167,16 +171,19 @@ fn lower_statement(statement: &Statement, functions: &HashSet<String>) -> Statem
         Statement::Block { body } => Statement::Block {
             body: lower_program(body, functions),
         },
+        Statement::Defer(statement) => {
+            Statement::Defer(Box::new(lower_statement(statement, functions)))
+        }
         Statement::While { condition, body } => Statement::While {
             condition: lower_expr(condition, functions),
             body: lower_program(body, functions),
         },
         Statement::For {
-            name,
+            binding,
             iterable,
             body,
         } => Statement::For {
-            name: name.clone(),
+            binding: binding.clone(),
             iterable: lower_expr(iterable, functions),
             body: lower_program(body, functions),
         },
@@ -231,6 +238,19 @@ fn lower_expr(expr: &Expr, functions: &HashSet<String>) -> Expr {
             write_args: write_args.clone(),
         },
         Expr::Call { name, args } => lower_call(name, args, functions),
+        Expr::NamedArg { name, value } => Expr::NamedArg {
+            name: name.clone(),
+            value: Box::new(lower_expr(value, functions)),
+        },
+        Expr::Range {
+            start,
+            end,
+            inclusive,
+        } => Expr::Range {
+            start: Box::new(lower_expr(start, functions)),
+            end: Box::new(lower_expr(end, functions)),
+            inclusive: *inclusive,
+        },
         Expr::Array(values) => Expr::Array(
             values
                 .iter()

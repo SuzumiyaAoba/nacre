@@ -41,6 +41,7 @@ fn greet(name: String, prefix: String = "Hello"): String {
 return "${prefix}, ${name}"
 }
 const message = greet("Nacre")
+const namedMessage = greet(prefix = "Hi", name = "Nacre")
 type Unary = String => String
 fn exclaim(value: String): String {
 return "${value}!"
@@ -103,11 +104,22 @@ const rawUid: Int = uid.value
 const text = "a'b"
 const greeting = "Hello, ${text}"
 const rawText = r"keep \n raw"
-const joinedText = "join" ++ "ed"
+let joinedText = "join"
+joinedText ++= "ed"
 const shell = env.SHELL
 const home = env.HOME ?? "/tmp"
 let count = 10
-count = count - 2 / 1 % 2
+count -= 2 / 1 % 2
+count += 1
+count *= 2
+count /= 2
+count %= 10
+let flags = 1
+flags <<= 2
+flags |= 1
+flags &= 5
+flags ^= 1
+flags >>= 1
 let widened: Float = answer
 const eq = answer == 42
 const ne = answer != 0
@@ -130,8 +142,21 @@ break
 count = count - 1
 continue
 }
+defer {
+const cleaned = true
+}
 for person in names {
 const copiedPerson = person
+}
+for index in 0..3 {
+const copiedIndex = index
+}
+for (left, right) in [("a", 1), ("b", 2)] {
+const copiedLeft = left
+const copiedRight = right
+}
+for { nickname } in [{ nickname: "Ada" }] {
+const copiedNickname = nickname
 }
 "#,
         &env_policy(&["SHELL", "HOME"]),

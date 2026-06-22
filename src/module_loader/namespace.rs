@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    BindingPattern, ClosureCapture, DoStep, Expr, ImplMethod, MatchArm, Param, Program, Statement,
-    TraitMethod, Type, TypeParam, VariantDecl,
+    BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplMethod, MatchArm, Param, Program,
+    Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 struct NamespaceContext<'a> {
@@ -331,16 +331,16 @@ fn namespace_statement(
             body: namespace_program_body(body, context, local_names, local_type_names),
         },
         Statement::For {
-            name,
+            binding,
             iterable,
             body,
         } => Statement::For {
-            name: name.clone(),
+            binding: binding.clone(),
             iterable: namespace_expr(iterable, context, local_names, local_type_names),
             body: namespace_program_body(
                 body,
                 context,
-                &with_local(local_names, name),
+                &with_for_binding_locals(local_names, binding),
                 local_type_names,
             ),
         },
@@ -419,6 +419,21 @@ fn namespace_function_body(
     namespace_program_body(program, context, &local_names, local_type_names)
 }
 
+fn with_for_binding_locals(local_names: &HashSet<String>, binding: &ForBinding) -> HashSet<String> {
+    let mut names = local_names.clone();
+    match binding {
+        ForBinding::Name(name) if name != "_" => {
+            names.insert(name.clone());
+        }
+        ForBinding::Name(_) => {}
+        ForBinding::Pattern(pattern) => {
+            names.extend(binding_pattern_names(pattern));
+        }
+    }
+    names
+}
+
+#[cfg(test)]
 fn with_local(local_names: &HashSet<String>, name: &str) -> HashSet<String> {
     let mut names = local_names.clone();
     if name != "_" {
@@ -484,6 +499,7 @@ fn collect_match_pattern_names(pattern: &Expr, local_names: &mut HashSet<String>
                 }
             }
         }
+        Expr::NamedArg { value, .. } => collect_match_pattern_names(value, local_names),
         _ => {}
     }
 }
@@ -647,6 +663,20 @@ fn namespace_expr(
             binding_names,
             local_names,
         )),
+        Expr::Range {
+            start,
+            end,
+            inclusive,
+        } => Expr::Range {
+            start: Box::new(namespace_expr(
+                start,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            end: Box::new(namespace_expr(end, context, local_names, local_type_names)),
+            inclusive: *inclusive,
+        },
         Expr::Array(values) => Expr::Array(
             values
                 .iter()
@@ -996,6 +1026,15 @@ fn namespace_expr(
                 .iter()
                 .map(|arg| namespace_expr(arg, context, local_names, local_type_names))
                 .collect(),
+        },
+        Expr::NamedArg { name, value } => Expr::NamedArg {
+            name: name.clone(),
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
         },
         Expr::Some(value) => Expr::Some(Box::new(namespace_expr(
             value,
@@ -2039,9 +2078,9 @@ fn namespace_interpolations(
             out.push_str(after_start);
             return out;
         };
-        let name = &after_start[..end];
-        out.push_str(&qualify_ref_name(
-            name,
+        let value = &after_start[..end];
+        out.push_str(&namespace_interpolation_ref(
+            value,
             namespace,
             binding_names,
             local_names,
@@ -2051,6 +2090,31 @@ fn namespace_interpolations(
     }
     out.push_str(rest);
     out
+}
+
+fn namespace_interpolation_ref(
+    value: &str,
+    namespace: &str,
+    binding_names: &HashSet<String>,
+    local_names: &HashSet<String>,
+) -> String {
+    if let Some((base, index)) = value
+        .strip_suffix(']')
+        .and_then(|value| value.split_once('['))
+    {
+        return format!(
+            "{}[{index}]",
+            qualify_ref_name(base, namespace, binding_names, local_names)
+        );
+    }
+    if let Some((base, field)) = value.split_once('.') {
+        let separator = if field.starts_with('_') { "" } else { "_" };
+        return format!(
+            "{}{separator}{field}",
+            qualify_ref_name(base, namespace, binding_names, local_names)
+        );
+    }
+    qualify_ref_name(value, namespace, binding_names, local_names)
 }
 
 #[cfg(test)]

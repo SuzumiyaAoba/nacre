@@ -16,6 +16,7 @@ accepted.
 const project = "Nacre"
 let revision = 1
 revision = revision + 1
+revision += 1
 ```
 
 Blocks use braces. Indentation is not syntactically significant, but four
@@ -30,6 +31,7 @@ Annotations are optional when the type can be inferred.
 const name: String = "Nacre"
 let count: Int = 1
 count = count + 1
+count += 1
 
 const enabled: Bool = true
 const ratio: Float = 1.5
@@ -79,6 +81,9 @@ Strings support interpolation and triple-quoted multiline values:
 ```nacre
 const name = "Nacre"
 const greeting = "Hello, ${name}"
+const values = ["a", "b"]
+const indexed = "first: ${values[0]}"
+const count = "items: ${values.len() + 1}"
 const message = """
 first line
 second line
@@ -86,7 +91,8 @@ second line
 const literal = r"backslashes stay \n literal"
 ```
 
-String and Path values provide operations such as `.len()`, `.isEmpty()`,
+String interpolation supports expressions, including variable, array-index,
+record-field, tuple-field, operator, and method-call expressions. String and Path values provide operations such as `.len()`, `.isEmpty()`,
 `.slice(...)`, `.contains(...)`, `.trim()`, `.replace(...)`, `.basename()`,
 `.dirname()`, `.stem()`, and `.extname()`.
 
@@ -103,6 +109,7 @@ fn firstLabel(prefix: String, values: ...String): String {
 
 const defaultGreeting = greet("Nacre")
 const customGreeting = greet("Nacre", "Hi")
+const namedGreeting = greet(prefix = "Hi", name = "Nacre")
 ```
 
 Nacre supports generic functions, trait bounds, function values, expression
@@ -119,7 +126,12 @@ fn decorate(value: String): String {
 
 const names = ["Ada", "Grace"]
 const decorated = names.map(decorate)
+const decoratedValue = ("Na" ++ "cre").decorate()
 ```
+
+Function calls may use named arguments after any positional arguments. Named
+arguments can appear in any order, and omitted parameters use their defaults
+when available.
 
 ## Options and Results
 
@@ -152,6 +164,14 @@ for name in ["Ada", "Grace"] {
     const length = name.len()
 }
 
+for index in 0..3 {
+    const copy = index
+}
+
+for (name, score) in [("Ada", 10), ("Grace", 12)] {
+    const label = "${name}: ${score}"
+}
+
 const label = if count == 0 {
     "done"
 } else {
@@ -160,9 +180,17 @@ const label = if count == 0 {
 ```
 
 `if`, `else if`, `else`, `while`, `for`, `break`, and `continue` are
-implemented. Bare blocks create a static scope. `break` and `continue` are
-valid only inside loops, and statements after an unconditional control-flow
-exit are rejected as unreachable.
+implemented. `for` iterates arrays and integer ranges. `start..end` excludes
+the end value, while `start..=end` includes it; descending ranges are supported.
+Loop bindings can destructure tuple, record, and array elements from arrays.
+Bare blocks create a static scope. `break` and `continue` are valid only inside
+loops, and statements after an unconditional control-flow exit are rejected as
+unreachable.
+
+`defer` registers an expression statement or block to run when the current
+block exits. Deferred statements run in last-in, first-out order before normal
+scope exit, `return`, `break`, or `continue`. A defer body must not itself exit
+control flow.
 
 Every path through a non-`Unit` function must return a value. A final expression
 is an implicit return, including when earlier branches return explicitly.
@@ -233,6 +261,14 @@ use tools.format
 const label = format.label("nacre")
 ```
 
+Use `as` to import a module under a shorter local namespace:
+
+```nacre
+use tools.format as fmt
+
+const shortLabel = fmt.label("nacre")
+```
+
 The dependency name becomes the first `use` segment. `use tools.format` searches
 for `../tools/format.ncr`, `../tools/format.d.ncr`, or
 `../tools/format/index.ncr`. `use tools` searches for `index.ncr` at the
@@ -285,6 +321,9 @@ Implemented operators include:
 - Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Applicative/monadic aliases: `<$>`, `<*>`, `>>=`, `<|>`
 - Default extraction: `??`
+
+Mutable bindings also support compound assignment with `+=`, `-=`, `*=`,
+`/=`, `%=`, `++=`, `&=`, `|=`, `^=`, `<<=`, and `>>=`.
 
 Parentheses control grouping.
 

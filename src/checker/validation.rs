@@ -91,6 +91,7 @@ pub(super) fn statement_flow(statement: &Statement) -> FlowSummary {
         Statement::Break => FlowSummary::broke(),
         Statement::Continue => FlowSummary::continued(),
         Statement::TryResult(_) => FlowSummary::try_result(),
+        Statement::Defer(_) => FlowSummary::falls_through(),
         Statement::Block { body } => program_flow(body),
         Statement::If {
             then_branch,
@@ -147,17 +148,43 @@ pub(super) fn interpolation_names(value: &str, line: usize) -> Result<Vec<String
                 "unterminated string interpolation".to_string(),
             ));
         };
-        let name = &after_start[..end];
-        if !is_valid_name(name) {
+        let interpolation = &after_start[..end];
+        let Some(name) = interpolation_base_name(interpolation) else {
             return Err(CompileError::new(
                 line,
-                format!("invalid interpolation name `{name}`"),
+                format!("invalid interpolation name `{interpolation}`"),
             ));
-        }
+        };
         names.push(name.to_string());
         rest = &after_start[end + 1..];
     }
     Ok(names)
+}
+
+fn interpolation_base_name(value: &str) -> Option<&str> {
+    if is_valid_name(value) {
+        return Some(value);
+    }
+    if let Some((base, index)) = value
+        .strip_suffix(']')
+        .and_then(|value| value.split_once('['))
+    {
+        if is_valid_name(base) && !index.is_empty() {
+            return Some(base);
+        }
+    }
+    if let Some((base, field)) = value.split_once('.') {
+        if is_valid_name(base) && (is_valid_name(field) || tuple_field_name(field)) {
+            return Some(base);
+        }
+    }
+    None
+}
+
+fn tuple_field_name(value: &str) -> bool {
+    value
+        .strip_prefix('_')
+        .is_some_and(|field| !field.is_empty() && field.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 pub(super) fn match_pattern_mismatch(line: usize, value_ty: &Type, pattern: &Expr) -> CompileError {

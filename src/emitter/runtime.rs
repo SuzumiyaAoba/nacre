@@ -1,5 +1,5 @@
 use crate::policy::ExecutionPolicy;
-use crate::{Program, Statement};
+use crate::{BindingPattern, Expr, ForBinding, Program, Statement};
 
 use super::quoting::emit_bash_string;
 
@@ -124,17 +124,103 @@ fn statement_needs_runtime(statement: &Statement) -> bool {
         Statement::SumType { variants, .. } => {
             variants.iter().any(|variant| !variant.fields.is_empty())
         }
-        Statement::Block { body } | Statement::While { body, .. } | Statement::For { body, .. } => {
-            program_needs_runtime(body)
+        Statement::Const { expr, .. }
+        | Statement::Let { expr, .. }
+        | Statement::Destructure { expr, .. }
+        | Statement::Assign { expr, .. }
+        | Statement::Expr(expr)
+        | Statement::Return(expr)
+        | Statement::TryResult(expr) => expr_needs_runtime(expr),
+        Statement::Block { body } => program_needs_runtime(body),
+        Statement::While { condition, body } => {
+            expr_needs_runtime(condition) || program_needs_runtime(body)
+        }
+        Statement::For {
+            binding,
+            iterable,
+            body,
+        } => {
+            for_binding_needs_runtime(binding)
+                || expr_needs_runtime(iterable)
+                || program_needs_runtime(body)
         }
         Statement::If {
+            condition,
             then_branch,
             else_branch,
-            ..
         } => {
-            program_needs_runtime(then_branch)
+            expr_needs_runtime(condition)
+                || program_needs_runtime(then_branch)
                 || else_branch.as_ref().is_some_and(program_needs_runtime)
         }
+        _ => false,
+    }
+}
+
+fn for_binding_needs_runtime(binding: &ForBinding) -> bool {
+    matches!(
+        binding,
+        ForBinding::Pattern(
+            BindingPattern::Tuple(_) | BindingPattern::Record(_) | BindingPattern::Array { .. }
+        )
+    )
+}
+
+fn expr_needs_runtime(expr: &Expr) -> bool {
+    match expr {
+        Expr::Array(values) => values.iter().any(|value| {
+            matches!(value, Expr::Tuple(_) | Expr::Record(_) | Expr::Array(_))
+                || expr_needs_runtime(value)
+        }),
+        Expr::Tuple(values) => values.iter().any(expr_needs_runtime),
+        Expr::Record(fields) => fields.iter().any(|(_, value)| expr_needs_runtime(value)),
+        Expr::Some(value)
+        | Expr::Ok(value)
+        | Expr::Err(value)
+        | Expr::ResultOption(value)
+        | Expr::TryResult(value)
+        | Expr::PathExists(value)
+        | Expr::IndexValue { value, .. }
+        | Expr::ArraySliceValue { value, .. }
+        | Expr::ArrayTakeValue { value, .. }
+        | Expr::ArrayDropValue { value, .. }
+        | Expr::TupleFieldValue { value, .. }
+        | Expr::FieldValue { value, .. }
+        | Expr::Cast { expr: value, .. }
+        | Expr::NewtypeCtor { value, .. } => expr_needs_runtime(value),
+        Expr::Default { value, fallback }
+        | Expr::DefaultTry { value, fallback }
+        | Expr::Binary {
+            left: value,
+            right: fallback,
+            ..
+        }
+        | Expr::Range {
+            start: value,
+            end: fallback,
+            ..
+        } => expr_needs_runtime(value) || expr_needs_runtime(fallback),
+        Expr::Call { args, .. } | Expr::AllowedCommand { args, .. } => {
+            args.iter().any(expr_needs_runtime)
+        }
+        Expr::IfElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            expr_needs_runtime(condition)
+                || expr_needs_runtime(then_expr)
+                || expr_needs_runtime(else_expr)
+        }
+        Expr::Match { value, arms } => {
+            expr_needs_runtime(value)
+                || arms.iter().any(|arm| {
+                    arm.pattern.as_ref().is_some_and(expr_needs_runtime)
+                        || arm.guard.as_ref().is_some_and(expr_needs_runtime)
+                        || expr_needs_runtime(&arm.expr)
+                })
+        }
+        Expr::LetIn { value, body, .. } => expr_needs_runtime(value) || expr_needs_runtime(body),
         _ => false,
     }
 }
@@ -157,6 +243,122 @@ __nacre_capture() {
   __nacre_runtime_capture_declaration="$(declare -p "$__nacre_runtime_capture_source")"
   __nacre_runtime_capture_declaration="${__nacre_runtime_capture_declaration/ ${__nacre_runtime_capture_source}=/ ${__nacre_runtime_capture_target}=}"
   printf '%s' "$__nacre_runtime_capture_declaration"
+}
+
+__nacre_tuple_pack() {
+  printf '__nacre_tuple:%s:' "$#"
+  local __nacre_runtime_value
+  for __nacre_runtime_value in "$@"; do
+    printf '%s:%s' "${#__nacre_runtime_value}" "$__nacre_runtime_value"
+  done
+}
+
+__nacre_tuple_field() {
+  local __nacre_runtime_tuple_data="${1#__nacre_tuple:}"
+  local __nacre_runtime_tuple_target="$2"
+  local __nacre_runtime_tuple_count="${__nacre_runtime_tuple_data%%:*}"
+  __nacre_runtime_tuple_data="${__nacre_runtime_tuple_data#*:}"
+  local __nacre_runtime_tuple_length
+  local __nacre_runtime_tuple_value
+  local __nacre_runtime_tuple_index
+  for ((__nacre_runtime_tuple_index = 1; __nacre_runtime_tuple_index <= __nacre_runtime_tuple_count; __nacre_runtime_tuple_index++)); do
+    __nacre_runtime_tuple_length="${__nacre_runtime_tuple_data%%:*}"
+    __nacre_runtime_tuple_data="${__nacre_runtime_tuple_data#*:}"
+    __nacre_runtime_tuple_value="${__nacre_runtime_tuple_data:0:__nacre_runtime_tuple_length}"
+    __nacre_runtime_tuple_data="${__nacre_runtime_tuple_data:__nacre_runtime_tuple_length}"
+    if [[ "$__nacre_runtime_tuple_index" == "$__nacre_runtime_tuple_target" ]]; then
+      printf '%s' "$__nacre_runtime_tuple_value"
+      return
+    fi
+  done
+}
+
+__nacre_record_pack() {
+  local __nacre_runtime_record_count=$(($# / 2))
+  printf '__nacre_record:%s:' "$__nacre_runtime_record_count"
+  local __nacre_runtime_record_key
+  local __nacre_runtime_record_value
+  while (($# > 0)); do
+    __nacre_runtime_record_key="$1"
+    __nacre_runtime_record_value="$2"
+    shift 2
+    printf '%s:%s%s:%s' "${#__nacre_runtime_record_key}" "$__nacre_runtime_record_key" "${#__nacre_runtime_record_value}" "$__nacre_runtime_record_value"
+  done
+}
+
+__nacre_record_field() {
+  local __nacre_runtime_record_data="${1#__nacre_record:}"
+  local __nacre_runtime_record_target="$2"
+  local __nacre_runtime_record_count="${__nacre_runtime_record_data%%:*}"
+  __nacre_runtime_record_data="${__nacre_runtime_record_data#*:}"
+  local __nacre_runtime_record_length
+  local __nacre_runtime_record_key
+  local __nacre_runtime_record_value
+  local __nacre_runtime_record_index
+  for ((__nacre_runtime_record_index = 0; __nacre_runtime_record_index < __nacre_runtime_record_count; __nacre_runtime_record_index++)); do
+    __nacre_runtime_record_length="${__nacre_runtime_record_data%%:*}"
+    __nacre_runtime_record_data="${__nacre_runtime_record_data#*:}"
+    __nacre_runtime_record_key="${__nacre_runtime_record_data:0:__nacre_runtime_record_length}"
+    __nacre_runtime_record_data="${__nacre_runtime_record_data:__nacre_runtime_record_length}"
+    __nacre_runtime_record_length="${__nacre_runtime_record_data%%:*}"
+    __nacre_runtime_record_data="${__nacre_runtime_record_data#*:}"
+    __nacre_runtime_record_value="${__nacre_runtime_record_data:0:__nacre_runtime_record_length}"
+    __nacre_runtime_record_data="${__nacre_runtime_record_data:__nacre_runtime_record_length}"
+    if [[ "$__nacre_runtime_record_key" == "$__nacre_runtime_record_target" ]]; then
+      printf '%s' "$__nacre_runtime_record_value"
+      return
+    fi
+  done
+}
+
+__nacre_array_pack() {
+  printf '__nacre_array:%s:' "$#"
+  local __nacre_runtime_value
+  for __nacre_runtime_value in "$@"; do
+    printf '%s:%s' "${#__nacre_runtime_value}" "$__nacre_runtime_value"
+  done
+}
+
+__nacre_array_field() {
+  local __nacre_runtime_array_data="${1#__nacre_array:}"
+  local __nacre_runtime_array_target="$2"
+  local __nacre_runtime_array_count="${__nacre_runtime_array_data%%:*}"
+  __nacre_runtime_array_data="${__nacre_runtime_array_data#*:}"
+  local __nacre_runtime_array_length
+  local __nacre_runtime_array_value
+  local __nacre_runtime_array_index
+  for ((__nacre_runtime_array_index = 0; __nacre_runtime_array_index < __nacre_runtime_array_count; __nacre_runtime_array_index++)); do
+    __nacre_runtime_array_length="${__nacre_runtime_array_data%%:*}"
+    __nacre_runtime_array_data="${__nacre_runtime_array_data#*:}"
+    __nacre_runtime_array_value="${__nacre_runtime_array_data:0:__nacre_runtime_array_length}"
+    __nacre_runtime_array_data="${__nacre_runtime_array_data:__nacre_runtime_array_length}"
+    if [[ "$__nacre_runtime_array_index" == "$__nacre_runtime_array_target" ]]; then
+      printf '%s' "$__nacre_runtime_array_value"
+      return
+    fi
+  done
+}
+
+__nacre_array_rest_decl() {
+  local __nacre_runtime_array_data="${1#__nacre_array:}"
+  local __nacre_runtime_array_target="$2"
+  local __nacre_runtime_array_start="$3"
+  local __nacre_runtime_array_count="${__nacre_runtime_array_data%%:*}"
+  __nacre_runtime_array_data="${__nacre_runtime_array_data#*:}"
+  printf 'declare -a %s=(' "$__nacre_runtime_array_target"
+  local __nacre_runtime_array_length
+  local __nacre_runtime_array_value
+  local __nacre_runtime_array_index
+  for ((__nacre_runtime_array_index = 0; __nacre_runtime_array_index < __nacre_runtime_array_count; __nacre_runtime_array_index++)); do
+    __nacre_runtime_array_length="${__nacre_runtime_array_data%%:*}"
+    __nacre_runtime_array_data="${__nacre_runtime_array_data#*:}"
+    __nacre_runtime_array_value="${__nacre_runtime_array_data:0:__nacre_runtime_array_length}"
+    __nacre_runtime_array_data="${__nacre_runtime_array_data:__nacre_runtime_array_length}"
+    if (( __nacre_runtime_array_index >= __nacre_runtime_array_start )); then
+      printf ' %q' "$__nacre_runtime_array_value"
+    fi
+  done
+  printf ')'
 }
 
 __nacre_variant_pack() {

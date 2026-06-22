@@ -165,12 +165,12 @@ const _ = "discarded"
             (
                 "const x = \"hello ${missing}\"",
                 1,
-                "undefined variable `missing` in string interpolation",
+                "undefined variable `missing`",
             ),
             (
                 "const x = \"hello ${bad-name}\"",
                 1,
-                "invalid interpolation name",
+                "undefined variable `bad`",
             ),
             (
                 "const x = \"hello ${missing\"",

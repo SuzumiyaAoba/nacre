@@ -142,6 +142,28 @@ fn public_api_reports_representative_type_errors() {
             "type Payload = Text(String) | Empty\nconst value = Text(1)",
             "argument 1 for variant `Text`",
         ),
+        (
+            "fn greet(name: String): String {\nreturn name\n}\nconst x = greet(value = \"Ada\")",
+            "has no parameter `value`",
+        ),
+        (
+            "fn greet(name: String): String {\nreturn name\n}\nconst x = greet(name = \"Ada\", name = \"Grace\")",
+            "provided more than once",
+        ),
+        (
+            "fn join(left: String, right: String): String {\nreturn left ++ right\n}\nconst x = join(left = \"A\", \"B\")",
+            "positional arguments",
+        ),
+        (
+            "const bad = \"a\"..\"z\"",
+            "type mismatch: expected Int, found String",
+        ),
+        (
+            "for (left, right) in [1, 2] {\nconst x = left\n}",
+            "tuple destructuring requires tuple value, found Int",
+        ),
+        ("const x = 1\nx += 1", "cannot assign to const `x`"),
+        ("let x = \"a\"\nx += 1", "operator `+` requires numeric operands"),
     ];
 
     for (source, expected) in cases {
@@ -213,6 +235,228 @@ const no = classify(false)
 }
 
 #[test]
+fn generated_bash_runs_defer_on_scope_exit_and_early_control_flow() {
+    let output = run_source(
+        r#"
+let log = ""
+
+fn append(value: String): Unit {
+log = log ++ value
+}
+
+fn marker(value: String): String {
+return value
+}
+
+fn early(flag: Bool): String {
+defer marker("A")
+defer marker("B")
+if flag {
+return "done"
+}
+"fallthrough"
+}
+
+early(true)
+
+for value in ["x", "y"] {
+defer append(value)
+if value == "x" {
+continue
+}
+break
+}
+
+{
+defer append("Z")
+append("body")
+}
+"#,
+        "printf 'log:%s\\n' \"$log\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "B\nA\ndone\nlog:xybodyZ\n");
+}
+
+#[test]
+fn generated_bash_runs_named_arguments_and_defaults() {
+    let output = run_source(
+        r##"
+fn greet(name: String, prefix: String = "Hello", suffix: String = "!"): String {
+return "${prefix}, ${name}${suffix}"
+}
+
+fn pair[T](left: T, right: T): String {
+return "${left}|${right}"
+}
+
+const reordered = greet(suffix = "?", name = "Ada", prefix = "Hi")
+const mixed = greet("Grace", suffix = ".")
+const defaulted = greet(name = "Nacre")
+const generic = pair(right = "R", left = "L")
+"##,
+        "printf '%s\\n%s\\n%s\\n%s\\n' \"$reordered\" \"$mixed\" \"$defaulted\" \"$generic\"",
+        &[],
+    );
+
+    assert_eq!(
+        stdout(output),
+        "Hi, Ada?\nHello, Grace.\nHello, Nacre!\nL|R\n"
+    );
+}
+
+#[test]
+fn generated_bash_runs_compound_assignments() {
+    let output = run_source(
+        r#"
+let count = 10
+count += 5
+count -= 3
+count *= 2
+count /= 4
+count %= 5
+
+let bits = 1
+bits <<= 3
+bits |= 2
+bits &= 10
+bits ^= 3
+bits >>= 1
+
+let label = "na"
+label ++= "cre"
+"#,
+        "printf '%s|%s|%s\\n' \"$count\" \"$bits\" \"$label\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "1|4|nacre\n");
+}
+
+#[test]
+fn generated_bash_runs_ranges() {
+    let output = run_source(
+        r#"
+let forward = ""
+for value in 1..4 {
+forward ++= "${value}"
+}
+
+let inclusive = ""
+for value in 1..=3 {
+inclusive ++= "${value}"
+}
+
+let down = ""
+for value in 3..1 {
+down ++= "${value}"
+}
+
+let downInclusive = ""
+for value in 3..=1 {
+downInclusive ++= "${value}"
+}
+
+const values = 2..=4
+let fromBinding = ""
+for value in values {
+fromBinding ++= "${value}"
+}
+"#,
+        "printf '%s|%s|%s|%s|%s\\n' \"$forward\" \"$inclusive\" \"$down\" \"$downInclusive\" \"$fromBinding\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "123|123|32|321|234\n");
+}
+
+#[test]
+fn generated_bash_runs_for_destructuring() {
+    let output = run_source(
+        r#"
+const pairs = [("A", 1), ("B", 2)]
+let pairText = ""
+for (label, count) in pairs {
+pairText ++= "${label}${count}"
+}
+
+const users = [
+    { name: "Ada", age: 36 },
+    { name: "Grace", age: 37 }
+]
+let userText = ""
+for { name, age } in users {
+userText ++= "${name}:${age};"
+}
+
+let rowText = ""
+const rows = [["x", "y"], ["m", "n"]]
+for [first, second] in rows {
+rowText ++= "${first}${second}"
+}
+
+let rowRestText = ""
+for [first, ...rest] in rows {
+rowRestText ++= "${first}${rest[0]}"
+}
+
+const person = { name: "Lin", age: 42 }
+const pair = ("left", "right")
+const accessText = "${person.name}:${person.age}:${pair._1}:${pair._2}"
+"#,
+        "printf '%s|%s|%s|%s|%s\\n' \"$pairText\" \"$userText\" \"$rowText\" \"$rowRestText\" \"$accessText\"",
+        &[],
+    );
+
+    assert_eq!(
+        stdout(output),
+        "A1B2|Ada:36;Grace:37;|xymn|xymn|Lin:42:left:right\n"
+    );
+}
+
+#[test]
+fn generated_bash_runs_expression_string_interpolation() {
+    let output = run_source(
+        r#"
+const count = 2
+const name = "nacre"
+const values = [4, 5]
+const person = { name: "Ada", active: true }
+const text = "sum:${count + values[0]} upper:${name.toUpper()} len:${name.len()} active:${person.active}"
+"#,
+        "printf '%s\\n' \"$text\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "sum:6 upper:NACRE len:5 active:true\n");
+}
+
+#[test]
+fn generated_bash_runs_const_bindings_inside_loops() {
+    let output = run_source(
+        r#"
+let log = ""
+for value in ["a", "b"] {
+const label = value.toUpper()
+log ++= label
+}
+
+let count = 0
+while count < 2 {
+const marker = "${count}"
+log ++= marker
+count += 1
+}
+"#,
+        "printf '%s\\n' \"$log\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "AB01\n");
+}
+
+#[test]
 fn generated_bash_runs_functions_generics_traits_and_newtypes() {
     let output = run_source(
         r#"
@@ -221,6 +465,9 @@ return "${prefix}, ${name}"
 }
 fn identity[T](value: T): T {
 return value
+}
+fn decorate(value: String, prefix: String = "[", suffix: String = "]"): String {
+return "${prefix}${value}${suffix}"
 }
 trait Show[T] {
 fn show(value: T): String
@@ -235,14 +482,19 @@ const greeting = greet("Nacre")
 const custom = greet("Nacre", "Hi")
 const generic = identity("value")
 const shown = Show.show(7)
+const shownExpr = (identity(8)).show()
+const decoratedExpr = ("na" ++ "cre").decorate(suffix = "!")
 const userId: UserId = UserId(9)
 const rawId: Int = userId.value
 "#,
-        "printf '%s|%s|%s|%s|%s\\n' \"$greeting\" \"$custom\" \"$generic\" \"$shown\" \"$rawId\"",
+        "printf '%s|%s|%s|%s|%s|%s|%s\\n' \"$greeting\" \"$custom\" \"$generic\" \"$shown\" \"$shownExpr\" \"$decoratedExpr\" \"$rawId\"",
         &[],
     );
 
-    assert_eq!(stdout(output), "Hello, Nacre|Hi, Nacre|value|int:7|9\n");
+    assert_eq!(
+        stdout(output),
+        "Hello, Nacre|Hi, Nacre|value|int:7|int:8|[nacre!|9\n"
+    );
 }
 
 #[test]
@@ -472,9 +724,9 @@ const defaultValue = "default"
     fs::write(
         &main,
         r#"
-use lib.values
-const made = values.make("default")
-const result = made
+use lib.values as vals
+const aliased = vals.make(vals.defaultValue)
+const result = aliased
 "#,
     )
     .unwrap();
@@ -648,12 +900,12 @@ fn compile_file_resolves_pure_standard_modules() {
     fs::write(
         &main,
         r#"
-use std.path
+use std.path as p
 use std.str
-const base = path.basename("/tmp/nacre.txt")
-const dir = path.dirname("/tmp/nacre.txt")
-const stem = path.stem("/tmp/nacre.txt")
-const ext = path.extname("/tmp/nacre.txt")
+const base = p.basename("/tmp/nacre.txt")
+const dir = p.dirname("/tmp/nacre.txt")
+const stem = p.stem("/tmp/nacre.txt")
+const ext = p.extname("/tmp/nacre.txt")
 const clean = str.trim(" safe ")
 "#,
     )
