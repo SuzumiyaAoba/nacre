@@ -1899,8 +1899,10 @@ peg::parser! {
             { Statement::Use { path, alias } }
 
         rule newtype_statement() -> Statement
-            = "newtype" hws1() name:type_identifier() hws() "=" hws() base:type_expr()
-            { Statement::Newtype { name, base } }
+            = "newtype" hws1() name:type_identifier()
+              type_params:("[" ws() values:(type_identifier() ++ comma()) ws() "]" { values })?
+              hws() "=" hws() base:type_expr()
+            { Statement::Newtype { name, type_params: type_params.unwrap_or_default(), base } }
 
         rule type_statement() -> Statement
             = "type" hws1() name:type_identifier()
@@ -1913,7 +1915,11 @@ peg::parser! {
                         type_params: type_params.unwrap_or_default(),
                         ty,
                     },
-                    TypeDeclaration::Sum(variants) => Statement::SumType { name, variants },
+                    TypeDeclaration::Sum(variants) => Statement::SumType {
+                        name,
+                        type_params: type_params.unwrap_or_default(),
+                        variants,
+                    },
                 }
             }
 
@@ -1940,11 +1946,15 @@ peg::parser! {
                 variants.extend(rest);
                 variants
             }
+            / value:variant_decl_with_fields() { vec![value] }
 
         rule variant_decl() -> VariantDecl
+            = variant_decl_with_fields()
+            / name:type_identifier() { VariantDecl { name, fields: Vec::new() } }
+
+        rule variant_decl_with_fields() -> VariantDecl
             = name:type_identifier() hws() "(" ws() fields:(type_expr() ** comma()) ws() ")"
                 { VariantDecl { name, fields } }
-            / name:type_identifier() { VariantDecl { name, fields: Vec::new() } }
 
         rule binding_statement_rule() -> Statement
             = mutable:("const" { false } / "let" { true }) hws1()

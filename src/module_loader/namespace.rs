@@ -209,24 +209,42 @@ fn namespace_statement(
                 ty: namespace_type(ty, namespace, type_names, &alias_type_names),
             }
         }
-        Statement::SumType { name, variants } => Statement::SumType {
-            name: qualify_type_name(name, namespace, type_names, local_type_names),
-            variants: variants
-                .iter()
-                .map(|variant| VariantDecl {
-                    name: qualify_function(&variant.name, namespace, function_names),
-                    fields: variant
-                        .fields
-                        .iter()
-                        .map(|field| namespace_type(field, namespace, type_names, local_type_names))
-                        .collect(),
-                })
-                .collect(),
-        },
-        Statement::Newtype { name, base } => Statement::Newtype {
-            name: qualify_type_name(name, namespace, type_names, local_type_names),
-            base: namespace_type(base, namespace, type_names, local_type_names),
-        },
+        Statement::SumType {
+            name,
+            type_params,
+            variants,
+        } => {
+            let type_param_names = type_params.iter().cloned().collect::<HashSet<_>>();
+            Statement::SumType {
+                name: qualify_type_name(name, namespace, type_names, local_type_names),
+                type_params: type_params.clone(),
+                variants: variants
+                    .iter()
+                    .map(|variant| VariantDecl {
+                        name: qualify_function(&variant.name, namespace, function_names),
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                namespace_type(field, namespace, type_names, &type_param_names)
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            }
+        }
+        Statement::Newtype {
+            name,
+            type_params,
+            base,
+        } => {
+            let type_param_names = type_params.iter().cloned().collect::<HashSet<_>>();
+            Statement::Newtype {
+                name: qualify_type_name(name, namespace, type_names, local_type_names),
+                type_params: type_params.clone(),
+                base: namespace_type(base, namespace, type_names, &type_param_names),
+            }
+        }
         Statement::Trait {
             name,
             type_param,

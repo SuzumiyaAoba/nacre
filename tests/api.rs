@@ -139,6 +139,14 @@ fn public_api_reports_representative_type_errors() {
             "type annotation mismatch",
         ),
         (
+            "type Box[T] = Box(T)\nconst bad: Box[Int] = Box(\"text\")",
+            "argument 1 for variant `Box`",
+        ),
+        (
+            "newtype Id[T] = String\nconst bad: Id[Int] = Id(1)",
+            "newtype constructor `Id` expected String",
+        ),
+        (
             "type Payload = Text(String) | Empty\nconst value = Text(1)",
             "argument 1 for variant `Text`",
         ),
@@ -460,6 +468,11 @@ count += 1
 fn generated_bash_runs_functions_generics_traits_and_newtypes() {
     let output = run_source(
         r#"
+type Box[T] = Box(T)
+type MaybePair[T] = Empty | Pair(T, T)
+type User = { name: String }
+newtype Id[T] = String
+
 fn greet(name: String, prefix: String = "Hello"): String {
 return "${prefix}, ${name}"
 }
@@ -478,6 +491,22 @@ return "int:${value}"
 }
 }
 newtype UserId = Int
+const boxed = Box("value")
+const pairValue: MaybePair[Int] = Pair(1, 2)
+const emptyValue: MaybePair[Int] = Empty
+const userIdGeneric: Id[User] = Id("u-1")
+const rawGenericId: String = userIdGeneric.value
+const boxedText = match boxed {
+Box(value) => value
+}
+const pairText = match pairValue {
+Pair(left, right) => "${left + right}",
+Empty => "empty"
+}
+const emptyText = match emptyValue {
+Pair(left, right) => "${left + right}",
+Empty => "empty"
+}
 const greeting = greet("Nacre")
 const custom = greet("Nacre", "Hi")
 const generic = identity("value")
@@ -487,13 +516,13 @@ const decoratedExpr = ("na" ++ "cre").decorate(suffix = "!")
 const userId: UserId = UserId(9)
 const rawId: Int = userId.value
 "#,
-        "printf '%s|%s|%s|%s|%s|%s|%s\\n' \"$greeting\" \"$custom\" \"$generic\" \"$shown\" \"$shownExpr\" \"$decoratedExpr\" \"$rawId\"",
+        "printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$boxedText\" \"$pairText\" \"$emptyText\" \"$rawGenericId\" \"$greeting\" \"$custom\" \"$generic\" \"$shown\" \"$shownExpr\" \"$decoratedExpr\" \"$rawId\"",
         &[],
     );
 
     assert_eq!(
         stdout(output),
-        "Hello, Nacre|Hi, Nacre|value|int:7|int:8|[nacre!|9\n"
+        "value|3|empty|u-1|Hello, Nacre|Hi, Nacre|value|int:7|int:8|[nacre!|9\n"
     );
 }
 

@@ -168,6 +168,7 @@ struct TraitSig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct VariantSig {
     sum_type: String,
+    type_params: Vec<String>,
     fields: Vec<Type>,
 }
 
@@ -194,6 +195,8 @@ struct TypeChecker {
     bindings: HashMap<String, Binding>,
     types: HashMap<String, Type>,
     generic_types: HashMap<String, (Vec<String>, Type)>,
+    generic_newtypes: HashMap<String, (Vec<String>, Type)>,
+    generic_sum_types: HashMap<String, Vec<String>>,
     traits: HashMap<String, TraitSig>,
     trait_impls: HashSet<(String, String)>,
     method_impls: HashMap<(String, String), Vec<(String, String)>>,
@@ -661,6 +664,8 @@ impl TypeChecker {
             bindings: HashMap::new(),
             types,
             generic_types: HashMap::new(),
+            generic_newtypes: HashMap::new(),
+            generic_sum_types: HashMap::new(),
             traits: HashMap::new(),
             trait_impls: HashSet::new(),
             method_impls: HashMap::new(),
@@ -1272,12 +1277,20 @@ impl TypeChecker {
                 self.define_type_alias(name, type_params, ty, line)?;
                 Ok(statement.clone())
             }
-            Statement::SumType { name, variants } => {
-                self.define_sum_type(name, variants, line)?;
+            Statement::SumType {
+                name,
+                type_params,
+                variants,
+            } => {
+                self.define_sum_type(name, type_params, variants, line)?;
                 Ok(statement.clone())
             }
-            Statement::Newtype { name, base } => {
-                self.define_newtype(name, base, line)?;
+            Statement::Newtype {
+                name,
+                type_params,
+                base,
+            } => {
+                self.define_newtype(name, type_params, base, line)?;
                 Ok(statement.clone())
             }
             Statement::Function {
@@ -1551,8 +1564,16 @@ impl TypeChecker {
                 type_params,
                 ty,
             } => self.define_type_alias(name, type_params, ty, line),
-            Statement::SumType { name, variants } => self.define_sum_type(name, variants, line),
-            Statement::Newtype { name, base } => self.define_newtype(name, base, line),
+            Statement::SumType {
+                name,
+                type_params,
+                variants,
+            } => self.define_sum_type(name, type_params, variants, line),
+            Statement::Newtype {
+                name,
+                type_params,
+                base,
+            } => self.define_newtype(name, type_params, base, line),
             Statement::Function {
                 name,
                 override_constructor,
@@ -2200,31 +2221,44 @@ impl TypeChecker {
         }
     }
 
-    fn define_newtype(&mut self, name: &str, base: &Type, line: usize) -> Result<(), CompileError> {
-        let resolved_base = self.resolve_type(base, line)?;
-        if self.types.contains_key(name) || self.generic_types.contains_key(name) {
+    fn define_newtype(
+        &mut self,
+        name: &str,
+        type_params: &[String],
+        base: &Type,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        let generic_names = type_params.iter().cloned().collect::<HashSet<_>>();
+        let resolved_base = self.resolve_type_with_generics(base, &generic_names, line)?;
+        if self.type_name_exists(name) {
             return Err(CompileError::new(
                 line,
                 format!("type `{name}` is already defined"),
             ));
         }
-        self.types.insert(
-            name.to_string(),
-            Type::Brand {
-                name: name.to_string(),
-                base: Box::new(resolved_base),
-            },
-        );
+        if type_params.is_empty() {
+            self.types.insert(
+                name.to_string(),
+                Type::Brand {
+                    name: name.to_string(),
+                    base: Box::new(resolved_base),
+                },
+            );
+        } else {
+            self.generic_newtypes
+                .insert(name.to_string(), (type_params.to_vec(), resolved_base));
+        }
         Ok(())
     }
 
     fn define_sum_type(
         &mut self,
         name: &str,
+        type_params: &[String],
         variants: &[VariantDecl],
         line: usize,
     ) -> Result<(), CompileError> {
-        if self.types.contains_key(name) || self.generic_types.contains_key(name) {
+        if self.type_name_exists(name) {
             return Err(CompileError::new(
                 line,
                 format!("type `{name}` is already defined"),
@@ -2239,6 +2273,7 @@ impl TypeChecker {
         let mut names = Vec::new();
         let mut seen = HashSet::new();
         let mut resolved_variants = Vec::new();
+        let generic_names = type_params.iter().cloned().collect::<HashSet<_>>();
         for variant in variants {
             if !seen.insert(variant.name.clone()) {
                 return Err(CompileError::new(
@@ -2261,24 +2296,37 @@ impl TypeChecker {
             let fields = variant
                 .fields
                 .iter()
-                .map(|field| self.resolve_type(field, line))
+                .map(|field| self.resolve_type_with_generics(field, &generic_names, line))
                 .collect::<Result<Vec<_>, _>>()?;
             names.push(variant.name.clone());
             resolved_variants.push((variant.name.clone(), fields));
         }
-        self.types
-            .insert(name.to_string(), Type::Named(name.to_string()));
+        if type_params.is_empty() {
+            self.types
+                .insert(name.to_string(), Type::Named(name.to_string()));
+        } else {
+            self.generic_sum_types
+                .insert(name.to_string(), type_params.to_vec());
+        }
         self.sum_types.insert(name.to_string(), names);
         for (variant, fields) in resolved_variants {
             self.variants.insert(
                 variant,
                 VariantSig {
                     sum_type: name.to_string(),
+                    type_params: type_params.to_vec(),
                     fields,
                 },
             );
         }
         Ok(())
+    }
+
+    fn type_name_exists(&self, name: &str) -> bool {
+        self.types.contains_key(name)
+            || self.generic_types.contains_key(name)
+            || self.generic_newtypes.contains_key(name)
+            || self.generic_sum_types.contains_key(name)
     }
 
     fn define_trait(
@@ -2566,13 +2614,7 @@ impl TypeChecker {
     ) -> Result<(), CompileError> {
         let generic_names = type_params.iter().cloned().collect::<HashSet<_>>();
         let resolved_ty = self.resolve_type_with_generics(ty, &generic_names, line)?;
-        if self.types.contains_key(name) {
-            return Err(CompileError::new(
-                line,
-                format!("type `{name}` is already defined"),
-            ));
-        }
-        if self.generic_types.contains_key(name) {
+        if self.type_name_exists(name) {
             return Err(CompileError::new(
                 line,
                 format!("type `{name}` is already defined"),
@@ -2812,15 +2854,15 @@ impl TypeChecker {
             return self.check_try_result_expr(value, line);
         }
         if let Some(annotation) = annotation {
+            let expected = self.resolve_type(annotation, line)?;
             if matches!(
                 expr,
                 Expr::Command { .. } | Expr::Pipeline { .. } | Expr::TryPipeline { .. }
-            ) {
-                let expected = self.resolve_type(annotation, line)?;
-                if result_types(&expected).is_some() {
-                    return Ok(command_result_type());
-                }
+            ) && result_types(&expected).is_some()
+            {
+                return Ok(command_result_type());
             }
+            return self.check_expr_expected(expr, &expected, line);
         }
         self.check_expr(expr, line)
     }
@@ -2833,6 +2875,35 @@ impl TypeChecker {
     ) -> Result<Type, CompileError> {
         if let Expr::Lambda { params, body } = expr {
             return self.check_lambda(params, body, expected, line);
+        }
+        if let Expr::NewtypeCtor { name, value } = expr {
+            if self.generic_newtypes.contains_key(name) {
+                return self.check_newtype_ctor_expected(name, value, expected, line);
+            }
+        }
+        if let Expr::Call { name, args } = expr {
+            if self.variants.contains_key(name) {
+                return self.check_variant_expected(name, args, expected, line);
+            }
+        }
+        if let Expr::Ident(name) = expr {
+            if self
+                .variants
+                .get(name)
+                .is_some_and(|variant| variant.fields.is_empty())
+            {
+                return self.check_variant_expected(name, &[], expected, line);
+            }
+        }
+        if let Expr::NewtypeCtor { name, value } = expr {
+            if self.variants.contains_key(name) {
+                return self.check_variant_expected(
+                    name,
+                    std::slice::from_ref(value.as_ref()),
+                    expected,
+                    line,
+                );
+            }
         }
         self.check_expr(expr, line)
     }
@@ -3203,14 +3274,14 @@ impl TypeChecker {
                 })
             }
             Expr::Call { name, args } => {
-                if let Some(variant) = self.variants.get(name) {
+                if self.variants.contains_key(name) {
                     return Ok(Expr::Variant {
                         name: name.clone(),
                         args: args
                             .iter()
                             .map(|arg| self.lower_expr(arg, line))
                             .collect::<Result<Vec<_>, _>>()?,
-                        field_types: variant.fields.clone(),
+                        field_types: self.instantiate_variant_fields(name, args, line)?,
                     });
                 }
                 if let Some((trait_name, method)) = self.scoped_trait_method_parts(name) {
@@ -3932,15 +4003,14 @@ impl TypeChecker {
                 })
             }
             Expr::NewtypeCtor { name, value } if self.variants.contains_key(name) => {
-                let field_types = self
-                    .variants
-                    .get(name)
-                    .map(|variant| variant.fields.clone())
-                    .unwrap_or_default();
                 Ok(Expr::Variant {
                     name: name.clone(),
                     args: vec![self.lower_expr(value, line)?],
-                    field_types,
+                    field_types: self.instantiate_variant_fields(
+                        name,
+                        std::slice::from_ref(value.as_ref()),
+                        line,
+                    )?,
                 })
             }
             Expr::NewtypeCtor { name, value } => Ok(Expr::NewtypeCtor {
@@ -4024,7 +4094,7 @@ impl TypeChecker {
                         pattern: arm
                             .pattern
                             .as_ref()
-                            .map(|pattern| self.lower_expr(pattern, line))
+                            .map(|pattern| self.lower_match_pattern(pattern, &value_ty, line))
                             .transpose()?,
                         guard: arm
                             .guard
@@ -4094,6 +4164,73 @@ impl TypeChecker {
                 }
             }
             Expr::Field { .. } => Ok(expr.clone()),
+        }
+    }
+
+    fn lower_match_pattern(
+        &self,
+        pattern: &Expr,
+        value_ty: &Type,
+        line: usize,
+    ) -> Result<Expr, CompileError> {
+        match pattern {
+            Expr::Call { name, args } if self.variants.contains_key(name) => Ok(Expr::Variant {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| self.lower_match_pattern(arg, value_ty, line))
+                    .collect::<Result<Vec<_>, _>>()?,
+                field_types: self.instantiate_variant_fields_for_value(name, value_ty, line)?,
+            }),
+            Expr::NewtypeCtor { name, value } if self.variants.contains_key(name) => {
+                Ok(Expr::Variant {
+                    name: name.clone(),
+                    args: vec![self.lower_match_pattern(value, value_ty, line)?],
+                    field_types: self.instantiate_variant_fields_for_value(name, value_ty, line)?,
+                })
+            }
+            Expr::Ident(name)
+                if self
+                    .variants
+                    .get(name)
+                    .is_some_and(|variant| variant.fields.is_empty()) =>
+            {
+                Ok(Expr::Variant {
+                    name: name.clone(),
+                    args: Vec::new(),
+                    field_types: Vec::new(),
+                })
+            }
+            Expr::Tuple(values) => Ok(Expr::Tuple(
+                values
+                    .iter()
+                    .map(|value| self.lower_match_pattern(value, value_ty, line))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Expr::RecordPattern(fields) => Ok(Expr::RecordPattern(
+                fields
+                    .iter()
+                    .map(|(name, value)| {
+                        Ok((
+                            name.clone(),
+                            value
+                                .as_ref()
+                                .map(|value| self.lower_match_pattern(value, value_ty, line))
+                                .transpose()?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, CompileError>>()?,
+            )),
+            Expr::Some(value) => Ok(Expr::Some(Box::new(
+                self.lower_match_pattern(value, value_ty, line)?,
+            ))),
+            Expr::Ok(value) => Ok(Expr::Ok(Box::new(
+                self.lower_match_pattern(value, value_ty, line)?,
+            ))),
+            Expr::Err(value) => Ok(Expr::Err(Box::new(
+                self.lower_match_pattern(value, value_ty, line)?,
+            ))),
+            other => Ok(other.clone()),
         }
     }
 
@@ -7583,7 +7720,36 @@ impl TypeChecker {
             return self.check_call(name, std::slice::from_ref(value), line);
         }
         let Some(ty) = self.types.get(name) else {
-            return Err(CompileError::new(line, format!("unknown type `{name}`")));
+            let Some((type_params, base)) = self.generic_newtypes.get(name) else {
+                return Err(CompileError::new(line, format!("unknown type `{name}`")));
+            };
+            let actual = self.check_expr(value, line)?;
+            let mut inferred = HashMap::new();
+            self.infer_generic_type(base, &actual, value, &mut inferred)
+                .map_err(|message| {
+                    CompileError::new(
+                        line,
+                        format!("newtype constructor `{name}` expected {message}"),
+                    )
+                })?;
+            let mut args = Vec::with_capacity(type_params.len());
+            for type_param in type_params {
+                let Some(ty) = inferred.get(type_param).cloned() else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("could not infer generic type `{type_param}` for newtype `{name}`"),
+                    ));
+                };
+                args.push(ty);
+            }
+            let mut concrete = HashMap::new();
+            for (type_param, ty) in type_params.iter().zip(&args) {
+                concrete.insert(type_param.clone(), ty.clone());
+            }
+            return Ok(Type::Brand {
+                name: applied_nominal_name(name, type_params, &concrete),
+                base: Box::new(substitute_generics(base, &concrete)),
+            });
         };
         let Type::Brand { base, .. } = ty else {
             return Err(CompileError::new(
@@ -7601,6 +7767,38 @@ impl TypeChecker {
                     "newtype constructor `{name}` expected {}, found {}",
                     base.name(),
                     value_ty.name()
+                ),
+            ))
+        }
+    }
+
+    fn check_newtype_ctor_expected(
+        &self,
+        name: &str,
+        value: &Expr,
+        expected: &Type,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Type::Brand {
+            name: expected_name,
+            base,
+        } = expected
+        else {
+            return self.check_newtype_ctor(name, value, line);
+        };
+        if !expected_name.starts_with(&format!("{name}[")) {
+            return self.check_newtype_ctor(name, value, line);
+        }
+        let actual = self.check_expr_expected(value, base, line)?;
+        if self.is_assignable(base, &actual, value) {
+            Ok(expected.clone())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!(
+                    "newtype constructor `{name}` expected {}, found {}",
+                    base.name(),
+                    actual.name()
                 ),
             ))
         }
@@ -7901,6 +8099,26 @@ impl TypeChecker {
                 }
                 self.infer_generic_type(expected_return, actual_return, expr, inferred)
             }
+            Type::Applied(expected_name, expected_args) => {
+                let Type::Applied(actual_name, actual_args) = actual else {
+                    return Err(format!(
+                        "expected {}, found {}",
+                        expected.name(),
+                        actual.name()
+                    ));
+                };
+                if expected_name != actual_name || expected_args.len() != actual_args.len() {
+                    return Err(format!(
+                        "expected {}, found {}",
+                        expected.name(),
+                        actual.name()
+                    ));
+                }
+                for (expected, actual) in expected_args.iter().zip(actual_args) {
+                    self.infer_generic_type(expected, actual, expr, inferred)?;
+                }
+                Ok(())
+            }
             Type::Union(expected_types) => {
                 for expected in expected_types {
                     let mut candidate = inferred.clone();
@@ -7992,21 +8210,163 @@ impl TypeChecker {
                 ),
             ));
         }
+        let mut inferred = HashMap::new();
         for (index, (arg, expected)) in args.iter().zip(&variant.fields).enumerate() {
             let actual = self.check_expr_expected(arg, expected, line)?;
-            if !self.is_assignable(expected, &actual, arg) {
+            if !variant.type_params.is_empty() {
+                self.infer_generic_type(expected, &actual, arg, &mut inferred)
+                    .map_err(|message| {
+                        CompileError::new(
+                            line,
+                            format!("argument {} for variant `{name}`: {message}", index + 1),
+                        )
+                    })?;
+            }
+            let concrete_expected = substitute_generics(expected, &inferred);
+            if !self.is_assignable(&concrete_expected, &actual, arg) {
                 return Err(CompileError::new(
                     line,
                     format!(
                         "argument {} for variant `{name}`: expected {}, found {}",
                         index + 1,
-                        expected.name(),
+                        concrete_expected.name(),
                         actual.name()
                     ),
                 ));
             }
         }
-        Ok(Type::Named(variant.sum_type.clone()))
+        if variant.type_params.is_empty() {
+            return Ok(Type::Named(variant.sum_type.clone()));
+        }
+        let mut concrete_args = Vec::with_capacity(variant.type_params.len());
+        for type_param in &variant.type_params {
+            let Some(ty) = inferred.get(type_param).cloned() else {
+                return Err(CompileError::new(
+                    line,
+                    format!("could not infer generic type `{type_param}` for variant `{name}`"),
+                ));
+            };
+            concrete_args.push(ty);
+        }
+        Ok(Type::Applied(variant.sum_type.clone(), concrete_args))
+    }
+
+    fn check_variant_expected(
+        &self,
+        name: &str,
+        args: &[Expr],
+        expected: &Type,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Some(variant) = self.variants.get(name) else {
+            return Err(CompileError::new(
+                line,
+                format!("undefined variant `{name}`"),
+            ));
+        };
+        let Type::Applied(expected_name, expected_args) = expected else {
+            return self.check_variant(name, args, line);
+        };
+        if expected_name != &variant.sum_type || expected_args.len() != variant.type_params.len() {
+            return self.check_variant(name, args, line);
+        }
+        if args.len() != variant.fields.len() {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "variant `{name}` expects {} arguments, found {}",
+                    variant.fields.len(),
+                    args.len()
+                ),
+            ));
+        }
+        let inferred = variant
+            .type_params
+            .iter()
+            .cloned()
+            .zip(expected_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        for (index, (arg, field)) in args.iter().zip(&variant.fields).enumerate() {
+            let expected_field = substitute_generics(field, &inferred);
+            let actual = self.check_expr_expected(arg, &expected_field, line)?;
+            if !self.is_assignable(&expected_field, &actual, arg) {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "argument {} for variant `{name}`: expected {}, found {}",
+                        index + 1,
+                        expected_field.name(),
+                        actual.name()
+                    ),
+                ));
+            }
+        }
+        Ok(expected.clone())
+    }
+
+    fn instantiate_variant_fields(
+        &self,
+        name: &str,
+        args: &[Expr],
+        line: usize,
+    ) -> Result<Vec<Type>, CompileError> {
+        let Some(variant) = self.variants.get(name) else {
+            return Ok(Vec::new());
+        };
+        if variant.type_params.is_empty() {
+            return Ok(variant.fields.clone());
+        }
+        let mut inferred = HashMap::new();
+        for (arg, expected) in args.iter().zip(&variant.fields) {
+            let actual = self.check_expr(arg, line)?;
+            self.infer_generic_type(expected, &actual, arg, &mut inferred)
+                .map_err(|message| {
+                    CompileError::new(line, format!("variant `{name}`: {message}"))
+                })?;
+        }
+        Ok(variant
+            .fields
+            .iter()
+            .map(|field| substitute_generics(field, &inferred))
+            .collect())
+    }
+
+    fn instantiate_variant_fields_for_value(
+        &self,
+        name: &str,
+        value_ty: &Type,
+        line: usize,
+    ) -> Result<Vec<Type>, CompileError> {
+        let Some(variant) = self.variants.get(name) else {
+            return Ok(Vec::new());
+        };
+        if variant.type_params.is_empty() {
+            return Ok(variant.fields.clone());
+        }
+        let Type::Applied(actual_name, actual_args) = value_ty else {
+            return Ok(variant.fields.clone());
+        };
+        if actual_name != &variant.sum_type || actual_args.len() != variant.type_params.len() {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "match variant `{name}` belongs to {}, found {}",
+                    variant.sum_type,
+                    value_ty.name()
+                ),
+            ));
+        }
+        let inferred = variant
+            .type_params
+            .iter()
+            .cloned()
+            .zip(actual_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Ok(variant
+            .fields
+            .iter()
+            .map(|field| substitute_generics(field, &inferred))
+            .collect())
     }
 
     fn check_if_expr(
@@ -8333,6 +8693,7 @@ impl TypeChecker {
             Type::Applied(name, args) if name == "Result" && args.len() == 2 => {
                 vec!["Ok".to_string(), "Err".to_string()]
             }
+            Type::Applied(name, _) => self.sum_types.get(name)?.clone(),
             Type::Named(name) => self.sum_types.get(name)?.clone(),
             _ => return None,
         };
@@ -8384,7 +8745,33 @@ impl TypeChecker {
                 format!("undefined variant `{name}`"),
             ));
         };
-        if value_ty != &Type::Named(variant.sum_type.clone()) {
+        let mut inferred = HashMap::new();
+        if variant.type_params.is_empty() {
+            if value_ty != &Type::Named(variant.sum_type.clone()) {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "match variant `{name}` belongs to {}, found {}",
+                        variant.sum_type,
+                        value_ty.name()
+                    ),
+                ));
+            }
+        } else if let Type::Applied(actual_name, actual_args) = value_ty {
+            if actual_name != &variant.sum_type || actual_args.len() != variant.type_params.len() {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "match variant `{name}` belongs to {}, found {}",
+                        variant.sum_type,
+                        value_ty.name()
+                    ),
+                ));
+            }
+            for (type_param, actual) in variant.type_params.iter().zip(actual_args) {
+                inferred.insert(type_param.clone(), actual.clone());
+            }
+        } else {
             return Err(CompileError::new(
                 line,
                 format!(
@@ -8406,6 +8793,7 @@ impl TypeChecker {
         }
         let mut bindings = Vec::new();
         for (pattern, expected) in args.iter().zip(&variant.fields) {
+            let expected = substitute_generics(expected, &inferred);
             if matches!(pattern, Expr::Ident(candidate) if candidate == "_") {
                 continue;
             }
@@ -8414,8 +8802,8 @@ impl TypeChecker {
                 continue;
             }
             let actual = self.check_expr(pattern, line)?;
-            if !self.is_comparable_by_equality(expected, &actual)
-                && !self.is_assignable(expected, &actual, pattern)
+            if !self.is_comparable_by_equality(&expected, &actual)
+                && !self.is_assignable(&expected, &actual, pattern)
             {
                 return Err(CompileError::new(
                     line,
@@ -8620,27 +9008,55 @@ impl TypeChecker {
                 ],
             )),
             Type::Applied(name, args) => {
-                let Some((type_params, body)) = self.generic_types.get(name) else {
-                    return Err(CompileError::new(line, format!("unknown type `{name}`")));
-                };
-                if args.len() != type_params.len() {
-                    return Err(CompileError::new(
-                        line,
-                        format!(
-                            "type `{name}` expects {} type arguments, found {}",
-                            type_params.len(),
-                            args.len()
-                        ),
-                    ));
+                if let Some((type_params, body)) = self.generic_types.get(name) {
+                    if args.len() != type_params.len() {
+                        return Err(CompileError::new(
+                            line,
+                            format!(
+                                "type `{name}` expects {} type arguments, found {}",
+                                type_params.len(),
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let inferred = self.resolve_type_args(type_params, args, generics, line)?;
+                    return Ok(substitute_generics(body, &inferred));
                 }
-                let mut inferred = HashMap::new();
-                for (type_param, arg) in type_params.iter().zip(args) {
-                    inferred.insert(
-                        type_param.clone(),
-                        self.resolve_type_with_generics(arg, generics, line)?,
-                    );
+                if let Some((type_params, base)) = self.generic_newtypes.get(name) {
+                    if args.len() != type_params.len() {
+                        return Err(CompileError::new(
+                            line,
+                            format!(
+                                "type `{name}` expects {} type arguments, found {}",
+                                type_params.len(),
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let inferred = self.resolve_type_args(type_params, args, generics, line)?;
+                    return Ok(Type::Brand {
+                        name: applied_nominal_name(name, type_params, &inferred),
+                        base: Box::new(substitute_generics(base, &inferred)),
+                    });
                 }
-                Ok(substitute_generics(body, &inferred))
+                if let Some(type_params) = self.generic_sum_types.get(name) {
+                    if args.len() != type_params.len() {
+                        return Err(CompileError::new(
+                            line,
+                            format!(
+                                "type `{name}` expects {} type arguments, found {}",
+                                type_params.len(),
+                                args.len()
+                            ),
+                        ));
+                    }
+                    let resolved_args = args
+                        .iter()
+                        .map(|arg| self.resolve_type_with_generics(arg, generics, line))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Type::Applied(name.clone(), resolved_args));
+                }
+                Err(CompileError::new(line, format!("unknown type `{name}`")))
             }
             Type::Array(element) => Ok(Type::Array(Box::new(
                 self.resolve_type_with_generics(element, generics, line)?,
@@ -8695,6 +9111,23 @@ impl TypeChecker {
             }
             other => Ok(other.clone()),
         }
+    }
+
+    fn resolve_type_args(
+        &self,
+        type_params: &[String],
+        args: &[Type],
+        generics: &HashSet<String>,
+        line: usize,
+    ) -> Result<HashMap<String, Type>, CompileError> {
+        let mut inferred = HashMap::new();
+        for (type_param, arg) in type_params.iter().zip(args) {
+            inferred.insert(
+                type_param.clone(),
+                self.resolve_type_with_generics(arg, generics, line)?,
+            );
+        }
+        Ok(inferred)
     }
 
     fn is_assignable(&self, expected: &Type, actual: &Type, expr: &Expr) -> bool {
@@ -8762,6 +9195,15 @@ impl TypeChecker {
             {
                 self.is_assignable(&expected_args[0], &actual_args[0], expr)
                     && self.is_assignable(&expected_args[1], &actual_args[1], expr)
+            }
+            (
+                Type::Applied(expected_name, expected_args),
+                Type::Applied(actual_name, actual_args),
+            ) if expected_name == actual_name && expected_args.len() == actual_args.len() => {
+                expected_args
+                    .iter()
+                    .zip(actual_args)
+                    .all(|(expected, actual)| self.is_assignable(expected, actual, expr))
             }
             (Type::Future(expected), Type::Future(actual)) => {
                 self.is_assignable(expected, actual, expr)
@@ -9184,6 +9626,20 @@ fn argument_count(count: usize) -> String {
 
 fn module_binding_name(module: &str, name: &str) -> String {
     format!("{module}_{name}")
+}
+
+fn applied_nominal_name(
+    name: &str,
+    type_params: &[String],
+    inferred: &HashMap<String, Type>,
+) -> String {
+    let args = type_params
+        .iter()
+        .filter_map(|param| inferred.get(param))
+        .map(Type::name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{name}[{args}]")
 }
 
 #[cfg(test)]

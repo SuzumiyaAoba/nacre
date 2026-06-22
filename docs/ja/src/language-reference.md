@@ -217,6 +217,9 @@ fn describe(message: Message): String {
 ```nacre
 type Identifier = Int
 newtype UserId = Int
+newtype Id[T] = String
+type Box[T] = Box(T)
+type Tree[T] = Leaf(T) | Branch(Tree[T], Tree[T])
 
 trait Show[T] {
     fn show(value: T): String

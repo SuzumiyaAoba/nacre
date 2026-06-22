@@ -21,10 +21,12 @@ pub enum Statement {
     },
     SumType {
         name: String,
+        type_params: Vec<String>,
         variants: Vec<VariantDecl>,
     },
     Newtype {
         name: String,
+        type_params: Vec<String>,
         base: Type,
     },
     Function {
