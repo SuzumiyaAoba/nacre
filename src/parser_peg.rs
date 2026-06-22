@@ -2022,17 +2022,27 @@ peg::parser! {
                 { BindingTarget::Name(name, annotation) }
 
         rule binding_pattern() -> BindingPattern
-            = "(" ws() names:(identifier() ++ comma()) ws() ")"
-                { BindingPattern::Tuple(names) }
-            / "{" ws() names:(identifier() ++ comma()) ws() "}"
-                {
-                    BindingPattern::Record(
-                        names.into_iter().map(|name| (name.clone(), name)).collect(),
-                    )
-                }
-            / "[" ws() names:(identifier() ** comma())
+            = binding_pattern_compound()
+
+        rule binding_pattern_value() -> BindingPattern
+            = binding_pattern_compound()
+            / name:identifier() { BindingPattern::Name(name) }
+
+        rule binding_pattern_compound() -> BindingPattern
+            = "(" ws() values:(binding_pattern_value() ++ comma()) ws() ")"
+                { BindingPattern::Tuple(values) }
+            / "{" ws() fields:(binding_record_field() ++ comma()) ws() "}"
+                { BindingPattern::Record(fields) }
+            / "[" ws() patterns:(binding_pattern_value() ** comma())
               rest:(comma() "..." name:identifier() { name })? ws() "]"
-                { BindingPattern::Array { names, rest } }
+                { BindingPattern::Array { patterns, rest } }
+
+        rule binding_record_field() -> (String, BindingPattern)
+            = field:identifier()
+              value:(ws() ":" ws() value:binding_pattern_value() { value })?
+                {
+                    (field.clone(), value.unwrap_or(BindingPattern::Name(field)))
+                }
 
         rule return_statement() -> Statement
             = "return" hws1() value:expression() { Statement::Return(value) }
@@ -2346,11 +2356,24 @@ peg::parser! {
 
         rule match_pattern() -> Option<Expr>
             = "_" !identifier_continue() { None }
-            / value:match_pattern_value() { Some(value) }
+            / value:match_pattern_value()
+              alias:(ws1() "as" ws1() name:identifier() { name })?
+            {
+                Some(match alias {
+                    Some(alias) => Expr::AliasPattern {
+                        pattern: Box::new(value),
+                        alias,
+                    },
+                    None => value,
+                })
+            }
 
         rule match_pattern_value() -> Expr
             = "{" ws() fields:(record_pattern_field() ++ comma()) ws() "}"
                 { Expr::RecordPattern(fields) }
+            / "[" ws() patterns:(match_pattern_value() ** comma())
+              rest:(comma() "..." name:identifier() { name })? ws() "]"
+                { Expr::ArrayPattern { patterns, rest } }
             / name:identifier() ws() "(" ws()
               args:(match_pattern_value() ** comma()) ws() ")"
                 {? super::match_constructor(name, args) }

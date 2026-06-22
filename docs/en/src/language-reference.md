@@ -68,6 +68,9 @@ Arrays, tuples, and records can be destructured:
 const (host, port) = endpoint
 const { name, age } = user
 const [first, second, ...rest] = names
+const ([nestedFirst], [tag, ...tags]) = (["Ada"], ["compiler", "math"])
+const issue = { owner: { id: 7 }, labels: ["bug", "runtime"] }
+const { owner: { id }, labels: [primaryLabel, ...otherLabels] } = issue
 ```
 
 Common collection operations include `.len()`, `.isEmpty()`, `.map(...)`,
@@ -182,7 +185,8 @@ const label = if count == 0 {
 `if`, `else if`, `else`, `while`, `for`, `break`, and `continue` are
 implemented. `for` iterates arrays and integer ranges. `start..end` excludes
 the end value, while `start..=end` includes it; descending ranges are supported.
-Loop bindings can destructure tuple, record, and array elements from arrays.
+Loop bindings can destructure tuple, record, and array elements from arrays,
+including nested binding patterns and array rest bindings.
 Bare blocks create a static scope. `break` and `continue` are valid only inside
 loops, and statements after an unconditional control-flow exit are rejected as
 unreachable.
@@ -197,8 +201,10 @@ is an implicit return, including when earlier branches return explicitly.
 
 ## Pattern Matching
 
-`match` supports literal, wildcard, tuple, record, option, result, and sum-type
-patterns. The checker verifies exhaustiveness for supported closed types.
+`match` supports literal, wildcard, tuple, record, array/rest, option, result,
+and sum-type patterns. `pattern as name` binds the full matched value after the
+inner pattern matches. The checker verifies exhaustiveness for supported closed
+types.
 
 ```nacre
 type Message = Text(String) | Pair(Int, Int) | Empty
@@ -210,6 +216,12 @@ fn describe(message: Message): String {
         Empty => "empty",
         _ => "blank"
     }
+}
+
+const values = ["a", "b", "c"]
+const summary = match values {
+    [first, ...rest] as all => "${first}:${rest[1]}:${all.len()}",
+    _ => "empty"
 }
 ```
 

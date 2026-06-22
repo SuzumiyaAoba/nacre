@@ -307,16 +307,19 @@ fn mangle_local_pattern(
     local_names: &mut HashMap<String, String>,
 ) -> BindingPattern {
     match pattern {
+        BindingPattern::Name(name) => {
+            BindingPattern::Name(mangle_local_binding_name(name, mangler, local_names))
+        }
         BindingPattern::Tuple(names) => BindingPattern::Tuple(
             names
                 .iter()
-                .map(|name| mangle_local_binding_name(name, mangler, local_names))
+                .map(|pattern| mangle_local_pattern(pattern, mangler, local_names))
                 .collect(),
         ),
-        BindingPattern::Array { names, rest } => BindingPattern::Array {
-            names: names
+        BindingPattern::Array { patterns, rest } => BindingPattern::Array {
+            patterns: patterns
                 .iter()
-                .map(|name| mangle_local_binding_name(name, mangler, local_names))
+                .map(|pattern| mangle_local_pattern(pattern, mangler, local_names))
                 .collect(),
             rest: rest
                 .as_ref()
@@ -328,7 +331,7 @@ fn mangle_local_pattern(
                 .map(|(field, name)| {
                     (
                         field.clone(),
-                        mangle_local_binding_name(name, mangler, local_names),
+                        mangle_local_pattern(name, mangler, local_names),
                     )
                 })
                 .collect(),

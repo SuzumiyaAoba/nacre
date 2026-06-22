@@ -67,6 +67,9 @@ const user: { name: String, age: Int } = {
 const (host, port) = endpoint
 const { name, age } = user
 const [first, second, ...rest] = names
+const ([nestedFirst], [tag, ...tags]) = (["Ada"], ["compiler", "math"])
+const issue = { owner: { id: 7 }, labels: ["bug", "runtime"] }
+const { owner: { id }, labels: [primaryLabel, ...otherLabels] } = issue
 ```
 
 コレクションでは `.len()`、`.isEmpty()`、`.map(...)`、
@@ -184,8 +187,9 @@ const label = if count == 0 {
 対応します。`for` は配列と整数 range を反復できます。`start..end` は終端を含まず、
 `start..=end` は終端を含みます。降順の range にも対応します。単独のブロックは
 静的なスコープを作ります。ループ束縛では、配列内のタプル、レコード、配列要素を
-destructure できます。`break` と `continue` はループ内でのみ使用でき、無条件に
-制御が移った後の文は到達不能として拒否されます。
+nested binding pattern や配列 rest 束縛を含めて destructure できます。`break` と
+`continue` はループ内でのみ使用でき、無条件に制御が移った後の文は到達不能として
+拒否されます。
 
 `defer` は、現在のブロックを抜けるときに実行する式文またはブロックを登録します。
 defer 文は通常のスコープ終了、`return`、`break`、`continue` の直前に
@@ -196,8 +200,9 @@ defer 文は通常のスコープ終了、`return`、`break`、`continue` の直
 
 ## パターンマッチ
 
-`match` は、リテラル、ワイルドカード、タプル、レコード、Option、Result、
-直和型のパターンに対応します。閉じた型ではチェッカーが網羅性を検査します。
+`match` は、リテラル、ワイルドカード、タプル、レコード、配列/rest、Option、
+Result、直和型のパターンに対応します。`pattern as name` は、内側のパターンに
+一致した後で match 対象全体を束縛します。閉じた型ではチェッカーが網羅性を検査します。
 
 ```nacre
 type Message = Text(String) | Pair(Int, Int) | Empty
@@ -209,6 +214,12 @@ fn describe(message: Message): String {
         Empty => "empty",
         _ => "blank"
     }
+}
+
+const values = ["a", "b", "c"]
+const summary = match values {
+    [first, ...rest] as all => "${first}:${rest[1]}:${all.len()}",
+    _ => "empty"
 }
 ```
 

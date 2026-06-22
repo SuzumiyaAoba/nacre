@@ -77,19 +77,7 @@ fn collect_declared_names(program: &Program, names: &mut HashSet<String>) {
             Statement::Const { name, .. } | Statement::Let { name, .. } => {
                 names.insert(name.clone());
             }
-            Statement::Destructure { pattern, .. } => match pattern {
-                BindingPattern::Tuple(values) => names.extend(values.iter().cloned()),
-                BindingPattern::Record(fields) => {
-                    names.extend(fields.iter().map(|(_, binding)| binding.clone()));
-                }
-                BindingPattern::Array {
-                    names: values,
-                    rest,
-                } => {
-                    names.extend(values.iter().cloned());
-                    names.extend(rest.iter().cloned());
-                }
-            },
+            Statement::Destructure { pattern, .. } => collect_binding_pattern_names(pattern, names),
             Statement::Block { body } | Statement::While { body, .. } => {
                 collect_declared_names(body, names);
             }
@@ -123,15 +111,25 @@ fn collect_for_binding_names(binding: &ForBinding, names: &mut HashSet<String>) 
 
 fn collect_binding_pattern_names(pattern: &BindingPattern, names: &mut HashSet<String>) {
     match pattern {
-        BindingPattern::Tuple(values) => names.extend(values.iter().cloned()),
-        BindingPattern::Record(fields) => {
-            names.extend(fields.iter().map(|(_, binding)| binding.clone()));
+        BindingPattern::Name(name) => {
+            if name != "_" {
+                names.insert(name.clone());
+            }
         }
-        BindingPattern::Array {
-            names: values,
-            rest,
-        } => {
-            names.extend(values.iter().cloned());
+        BindingPattern::Tuple(values) => {
+            for value in values {
+                collect_binding_pattern_names(value, names);
+            }
+        }
+        BindingPattern::Record(fields) => {
+            for (_, binding) in fields {
+                collect_binding_pattern_names(binding, names);
+            }
+        }
+        BindingPattern::Array { patterns, rest } => {
+            for value in patterns {
+                collect_binding_pattern_names(value, names);
+            }
             names.extend(rest.iter().cloned());
         }
     }
@@ -369,6 +367,12 @@ fn collect_expr_function_refs(
             collect_exprs_function_refs(args, functions, refs);
         }
         Expr::NamedArg { value, .. } => collect_expr_function_refs(value, functions, refs),
+        Expr::ArrayPattern { patterns, .. } => {
+            collect_exprs_function_refs(patterns, functions, refs);
+        }
+        Expr::AliasPattern { pattern, .. } => {
+            collect_expr_function_refs(pattern, functions, refs);
+        }
         Expr::Ident(name) | Expr::Closure { name, .. } if functions.contains(name) => {
             refs.insert(name.clone());
         }
@@ -884,12 +888,18 @@ impl TypeChecker {
             }
             Expr::Array(values)
             | Expr::Tuple(values)
+            | Expr::ArrayPattern {
+                patterns: values, ..
+            }
             | Expr::Variant { args: values, .. }
             | Expr::Call { args: values, .. }
             | Expr::AllowedCommand { args: values, .. } => {
                 for value in values {
                     self.extract_nested_try_results(value, false, prefix);
                 }
+            }
+            Expr::AliasPattern { pattern, .. } => {
+                self.extract_nested_try_results(pattern, false, prefix);
             }
             Expr::Range { start, end, .. } => {
                 self.extract_nested_try_results(start, false, prefix);
@@ -2825,9 +2835,10 @@ impl TypeChecker {
         line: usize,
     ) -> Result<(), CompileError> {
         match (pattern, ty) {
-            (BindingPattern::Array { names, rest }, Type::Array(element)) => {
-                for name in names {
-                    self.define(name, (**element).clone(), mutable, line)?;
+            (BindingPattern::Name(name), ty) => self.define(name, ty.clone(), mutable, line),
+            (BindingPattern::Array { patterns, rest }, Type::Array(element)) => {
+                for pattern in patterns {
+                    self.define_destructure(pattern, element, mutable, line)?;
                 }
                 if let Some(rest) = rest {
                     self.define(rest, Type::Array(element.clone()), mutable, line)?;
@@ -2841,19 +2852,19 @@ impl TypeChecker {
                     other.name()
                 ),
             )),
-            (BindingPattern::Tuple(names), Type::Tuple(elements)) => {
-                if names.len() != elements.len() {
+            (BindingPattern::Tuple(patterns), Type::Tuple(elements)) => {
+                if patterns.len() != elements.len() {
                     return Err(CompileError::new(
                         line,
                         format!(
                             "tuple destructuring expected {} values, found {}",
-                            names.len(),
+                            patterns.len(),
                             elements.len()
                         ),
                     ));
                 }
-                for (name, ty) in names.iter().zip(elements) {
-                    self.define(name, ty.clone(), mutable, line)?;
+                for (pattern, ty) in patterns.iter().zip(elements) {
+                    self.define_destructure(pattern, ty, mutable, line)?;
                 }
                 Ok(())
             }
@@ -2865,7 +2876,7 @@ impl TypeChecker {
                 ),
             )),
             (BindingPattern::Record(bindings), Type::Record(fields)) => {
-                for (field, name) in bindings {
+                for (field, pattern) in bindings {
                     let Some((_, ty)) = fields.iter().find(|(candidate, _)| candidate == field)
                     else {
                         return Err(CompileError::new(
@@ -2873,7 +2884,7 @@ impl TypeChecker {
                             format!("record destructuring field `{field}` is missing"),
                         ));
                     };
-                    self.define(name, ty.clone(), mutable, line)?;
+                    self.define_destructure(pattern, ty, mutable, line)?;
                 }
                 Ok(())
             }
@@ -4292,6 +4303,17 @@ impl TypeChecker {
             | Expr::ProcessArgs
             | Expr::CliParse
             | Expr::Ident(_) => Ok(expr.clone()),
+            Expr::ArrayPattern { patterns, rest } => Ok(Expr::ArrayPattern {
+                patterns: patterns
+                    .iter()
+                    .map(|value| self.lower_expr(value, line))
+                    .collect::<Result<Vec<_>, _>>()?,
+                rest: rest.clone(),
+            }),
+            Expr::AliasPattern { pattern, alias } => Ok(Expr::AliasPattern {
+                pattern: Box::new(self.lower_expr(pattern, line)?),
+                alias: alias.clone(),
+            }),
             Expr::Field { name, field } if !self.bindings.contains_key(name) => {
                 let qualified = format!("{name}.{field}");
                 if self.functions.contains_key(&qualified) {
@@ -4351,6 +4373,17 @@ impl TypeChecker {
                     .map(|value| self.lower_match_pattern(value, value_ty, line))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
+            Expr::ArrayPattern { patterns, rest } => Ok(Expr::ArrayPattern {
+                patterns: patterns
+                    .iter()
+                    .map(|value| self.lower_match_pattern(value, value_ty, line))
+                    .collect::<Result<Vec<_>, _>>()?,
+                rest: rest.clone(),
+            }),
+            Expr::AliasPattern { pattern, alias } => Ok(Expr::AliasPattern {
+                pattern: Box::new(self.lower_match_pattern(pattern, value_ty, line)?),
+                alias: alias.clone(),
+            }),
             Expr::RecordPattern(fields) => Ok(Expr::RecordPattern(
                 fields
                     .iter()
@@ -4738,6 +4771,14 @@ impl TypeChecker {
             Expr::RecordPattern(_) => Err(CompileError::new(
                 line,
                 "record patterns are only valid in match arms".to_string(),
+            )),
+            Expr::ArrayPattern { .. } => Err(CompileError::new(
+                line,
+                "array patterns are only valid in match arms".to_string(),
+            )),
+            Expr::AliasPattern { .. } => Err(CompileError::new(
+                line,
+                "alias patterns are only valid in match arms".to_string(),
             )),
             Expr::Tuple(values) => self.check_tuple(values, line),
             Expr::Index { name, index } => self.check_index(name, index, line),
@@ -8786,6 +8827,30 @@ impl TypeChecker {
                 }
                 Ok(bindings)
             }
+            Expr::ArrayPattern { patterns, rest } => {
+                let Type::Array(element_ty) = value_ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("array pattern requires Array, found {}", value_ty.name()),
+                    ));
+                };
+                let mut bindings = Vec::new();
+                for pattern in patterns {
+                    bindings
+                        .extend(self.check_match_constructor_payload(pattern, element_ty, line)?);
+                }
+                if let Some(rest) = rest.as_ref().filter(|name| *name != "_") {
+                    bindings.push((rest.clone(), value_ty.clone()));
+                }
+                Ok(bindings)
+            }
+            Expr::AliasPattern { pattern, alias } => {
+                let mut bindings = self.check_match_pattern(pattern, pattern, value_ty, line)?;
+                if alias != "_" {
+                    bindings.push((alias.clone(), value_ty.clone()));
+                }
+                Ok(bindings)
+            }
             Expr::RecordPattern(patterns) => {
                 let Type::Record(fields) = value_ty else {
                     return Err(match_pattern_mismatch(line, value_ty, pattern));
@@ -8807,19 +8872,11 @@ impl TypeChecker {
                             bindings.push((name.clone(), expected_ty.clone()));
                         }
                         Some(pattern) => {
-                            let pattern_ty = self.check_expr(pattern, line)?;
-                            if !self.is_comparable_by_equality(expected_ty, &pattern_ty)
-                                && !self.is_assignable(expected_ty, &pattern_ty, pattern)
-                            {
-                                return Err(CompileError::new(
-                                    line,
-                                    format!(
-                                        "match pattern type mismatch: expected {}, found {}",
-                                        expected_ty.name(),
-                                        pattern_ty.name()
-                                    ),
-                                ));
-                            }
+                            bindings.extend(self.check_match_constructor_payload(
+                                pattern,
+                                expected_ty,
+                                line,
+                            )?);
                         }
                     }
                 }
@@ -8995,7 +9052,13 @@ impl TypeChecker {
                 Ok(vec![(name.clone(), expected_ty.clone())])
             };
         }
-        if matches!(payload, Expr::Tuple(_) | Expr::RecordPattern(_)) {
+        if matches!(
+            payload,
+            Expr::Tuple(_)
+                | Expr::RecordPattern(_)
+                | Expr::ArrayPattern { .. }
+                | Expr::AliasPattern { .. }
+        ) {
             return self.check_match_pattern(payload, payload, expected_ty, line);
         }
         let payload_ty = self.check_expr(payload, line)?;
@@ -9744,6 +9807,8 @@ fn expr_uses_process_args(expr: &Expr) -> bool {
         Expr::RecordPattern(fields) => fields
             .iter()
             .any(|(_, value)| value.as_ref().is_some_and(expr_uses_process_args)),
+        Expr::ArrayPattern { patterns, .. } => patterns.iter().any(expr_uses_process_args),
+        Expr::AliasPattern { pattern, .. } => expr_uses_process_args(pattern),
         Expr::Lambda { body, .. } => expr_uses_process_args(body),
         Expr::Do { steps, result } => {
             steps.iter().any(do_step_uses_process_args) || expr_uses_process_args(result)

@@ -148,6 +148,10 @@ fn emit_match_value(out: &mut String, value: &Expr, arms: &[MatchArm]) {
                     out.push_str(field);
                     out.push('"');
                 }
+            } else if has_array_match_pattern(arms) {
+                out.push_str("__nacre_match=(\"${");
+                out.push_str(name);
+                out.push_str("[@]}\")");
             } else if let Some(width) = tuple_match_width(arms) {
                 out.push_str("__nacre_match=(");
                 for index in 0..width {
@@ -343,6 +347,9 @@ pub(super) fn emit_match_pattern(out: &mut String, pattern: &Expr) {
         Expr::String(value) | Expr::RawString(value) => emit_shell_word(out, value),
         Expr::NewtypeCtor { value, .. } => emit_match_pattern(out, value),
         Expr::Cast { expr, .. } => emit_match_pattern(out, expr),
+        Expr::ArrayPattern { .. } | Expr::AliasPattern { .. } => {
+            unreachable!("patterns are not emitted as scalar match patterns")
+        }
         _ => emit_expr(out, pattern),
     }
 }
@@ -374,6 +381,12 @@ fn emit_match_arm_test(out: &mut String, pattern: Option<&Expr>, guard: Option<&
             }
         }
         Some(Expr::Tuple(patterns)) => emit_tuple_match_arm_test(out, patterns, guard),
+        Some(Expr::ArrayPattern { patterns, rest }) => {
+            emit_array_match_arm_test(out, patterns, rest.as_deref(), guard)
+        }
+        Some(Expr::AliasPattern { pattern, alias }) => {
+            emit_alias_match_arm_test(out, pattern, alias, guard)
+        }
         Some(Expr::RecordPattern(patterns)) => emit_record_match_arm_test(out, patterns, guard),
         Some(Expr::Variant {
             name,
@@ -437,6 +450,43 @@ fn emit_variant_match_arm_test(
     emit_shell_word(out, name);
     out.push_str(" ]");
     emit_variant_pattern_conditions(out, patterns, field_types);
+    if let Some(guard) = guard {
+        out.push_str(" && ");
+        emit_match_guard(out, guard);
+    }
+}
+
+fn has_array_match_pattern(arms: &[MatchArm]) -> bool {
+    arms.iter()
+        .any(|arm| arm.pattern.as_ref().is_some_and(pattern_has_array_pattern))
+}
+
+fn pattern_has_array_pattern(pattern: &Expr) -> bool {
+    match pattern {
+        Expr::ArrayPattern { .. } => true,
+        Expr::AliasPattern { pattern, .. } => pattern_has_array_pattern(pattern),
+        Expr::Tuple(values)
+        | Expr::Variant { args: values, .. }
+        | Expr::Call { args: values, .. } => values.iter().any(pattern_has_array_pattern),
+        Expr::RecordPattern(fields) => fields
+            .iter()
+            .any(|(_, value)| value.as_ref().is_some_and(pattern_has_array_pattern)),
+        Expr::Some(value) | Expr::Ok(value) | Expr::Err(value) => pattern_has_array_pattern(value),
+        _ => false,
+    }
+}
+
+fn emit_alias_match_arm_test(out: &mut String, pattern: &Expr, alias: &str, guard: Option<&Expr>) {
+    emit_match_arm_test(out, Some(pattern), None);
+    if alias != "_" {
+        out.push_str(" && ");
+        out.push_str(alias);
+        if matches!(pattern, Expr::ArrayPattern { .. }) {
+            out.push_str("=(\"${__nacre_match[@]}\")");
+        } else {
+            out.push_str("=\"$__nacre_match\"");
+        }
+    }
     if let Some(guard) = guard {
         out.push_str(" && ");
         emit_match_guard(out, guard);
@@ -571,6 +621,42 @@ fn emit_tuple_match_arm_test(out: &mut String, patterns: &[Expr], guard: Option<
     out.push_str("[ \"${#__nacre_match[@]}\" -eq ");
     out.push_str(&patterns.len().to_string());
     out.push_str(" ]");
+    emit_indexed_pattern_conditions(out, patterns, "__nacre_match");
+    if let Some(guard) = guard {
+        out.push_str(" && ");
+        emit_match_guard(out, guard);
+    }
+}
+
+fn emit_array_match_arm_test(
+    out: &mut String,
+    patterns: &[Expr],
+    rest: Option<&str>,
+    guard: Option<&Expr>,
+) {
+    out.push_str("[ \"${#__nacre_match[@]}\" ");
+    if rest.is_some() {
+        out.push_str("-ge ");
+    } else {
+        out.push_str("-eq ");
+    }
+    out.push_str(&patterns.len().to_string());
+    out.push_str(" ]");
+    emit_indexed_pattern_conditions(out, patterns, "__nacre_match");
+    if let Some(rest) = rest.filter(|name| *name != "_") {
+        out.push_str(" && ");
+        out.push_str(rest);
+        out.push_str("=(\"${__nacre_match[@]:");
+        out.push_str(&patterns.len().to_string());
+        out.push_str("}\")");
+    }
+    if let Some(guard) = guard {
+        out.push_str(" && ");
+        emit_match_guard(out, guard);
+    }
+}
+
+fn emit_indexed_pattern_conditions(out: &mut String, patterns: &[Expr], source: &str) {
     for (index, pattern) in patterns.iter().enumerate() {
         if matches!(pattern, Expr::Ident(name) if name == "_") {
             continue;
@@ -578,20 +664,20 @@ fn emit_tuple_match_arm_test(out: &mut String, patterns: &[Expr], guard: Option<
         if let Expr::Ident(name) = pattern {
             out.push_str(" && ");
             out.push_str(name);
-            out.push_str("=\"${__nacre_match[");
+            out.push_str("=\"${");
+            out.push_str(source);
+            out.push('[');
             out.push_str(&index.to_string());
             out.push_str("]}\"");
             continue;
         }
-        out.push_str(" && [ \"${__nacre_match[");
+        out.push_str(" && [ \"${");
+        out.push_str(source);
+        out.push('[');
         out.push_str(&index.to_string());
         out.push_str("]}\" = ");
         emit_match_pattern(out, pattern);
         out.push_str(" ]");
-    }
-    if let Some(guard) = guard {
-        out.push_str(" && ");
-        emit_match_guard(out, guard);
     }
 }
 

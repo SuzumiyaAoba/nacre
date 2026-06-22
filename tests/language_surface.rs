@@ -158,6 +158,13 @@ const copiedRight = right
 for { nickname } in [{ nickname: "Ada" }] {
 const copiedNickname = nickname
 }
+const nestedUser = { user: { name: "Ada" }, tags: ["compiler", "math"] }
+const { user: { name: nestedUserName }, tags: [nestedTag, ...nestedTags] } = nestedUser
+for { user: { name: loopUserName }, tags: [loopTag, ...loopTags] } in [
+    { user: { name: "Grace" }, tags: ["runtime", "docs"] }
+] {
+const copiedLoopUser = "${loopUserName}:${loopTag}:${loopTags[0]}"
+}
 "#,
         &env_policy(&["SHELL", "HOME"]),
     )

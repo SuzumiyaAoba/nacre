@@ -170,6 +170,14 @@ fn public_api_reports_representative_type_errors() {
             "for (left, right) in [1, 2] {\nconst x = left\n}",
             "tuple destructuring requires tuple value, found Int",
         ),
+        (
+            "const payload = { user: { name: \"Ada\" } }\nconst { user: { age } } = payload",
+            "record destructuring field `age` is missing",
+        ),
+        (
+            "const value = 1\nconst x = match value { [first] => first, _ => 0 }",
+            "array pattern requires Array",
+        ),
         ("const x = 1\nx += 1", "cannot assign to const `x`"),
         ("let x = \"a\"\nx += 1", "operator `+` requires numeric operands"),
     ];
@@ -412,14 +420,16 @@ rowRestText ++= "${first}${rest[0]}"
 const person = { name: "Lin", age: 42 }
 const pair = ("left", "right")
 const accessText = "${person.name}:${person.age}:${pair._1}:${pair._2}"
+const nested = [["Mina"], ["shell", "types", "docs"]]
+const ([nestedName], [firstTag, ...restTags]) = (nested[0], nested[1])
 "#,
-        "printf '%s|%s|%s|%s|%s\\n' \"$pairText\" \"$userText\" \"$rowText\" \"$rowRestText\" \"$accessText\"",
+        "printf '%s|%s|%s|%s|%s|%s:%s:%s\\n' \"$pairText\" \"$userText\" \"$rowText\" \"$rowRestText\" \"$accessText\" \"$nestedName\" \"$firstTag\" \"${restTags[1]}\"",
         &[],
     );
 
     assert_eq!(
         stdout(output),
-        "A1B2|Ada:36;Grace:37;|xymn|xymn|Lin:42:left:right\n"
+        "A1B2|Ada:36;Grace:37;|xymn|xymn|Lin:42:left:right|Mina:shell:docs\n"
     );
 }
 
@@ -700,6 +710,16 @@ const restValues = ["head", "middle", "tail"]
 const [head, ...tail] = restValues
 const user = { name: "Ada", tags: ["compiler", "math"] }
 const { name, tags } = user
+const nestedPayload = (["Grace"], ["runtime", "docs"])
+const ([nestedUser], [nestedFirst, ...nestedRest]) = nestedPayload
+const nestedRows = [
+    ["Lin", "cli", "tests"],
+    ["Ken", "docs", "site"]
+]
+let nestedLoop = ""
+for [loopName, loopFirst, ...loopRest] in nestedRows {
+nestedLoop ++= "${loopName}:${loopFirst}:${loopRest[0]};"
+}
 const endpoint = { host: "localhost", port: 8080 }
 const endpointHost = endpoint.host
 const endpointPort = endpoint.port
@@ -708,14 +728,39 @@ const emptyItems: [String] = []
 const empty = emptyItems.isEmpty()
 const missingIndex = restValues.indexOf("absent")
 "#,
-        "printf '%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$first\" \"$second\" \"$third\" \"$head\" \"${tail[1]}\" \"$name:${tags[0]}\" \"$endpointText\" \"$empty:$missingIndex\"",
+        "printf '%s|%s|%s|%s|%s|%s|%s:%s:%s|%s|%s|%s\\n' \"$first\" \"$second\" \"$third\" \"$head\" \"${tail[1]}\" \"$name:${tags[0]}\" \"$nestedUser\" \"$nestedFirst\" \"${nestedRest[0]}\" \"$nestedLoop\" \"$endpointText\" \"$empty:$missingIndex\"",
         &[],
     );
 
     assert_eq!(
         stdout(output),
-        "1|2|3|head|tail|Ada:compiler|localhost:8080|true:-1\n"
+        "1|2|3|head|tail|Ada:compiler|Grace:runtime:docs|Lin:cli:tests;Ken:docs:site;|localhost:8080|true:-1\n"
     );
+}
+
+#[test]
+fn generated_bash_runs_array_and_alias_match_patterns() {
+    let output = run_source(
+        r#"
+const values = ["a", "b", "c"]
+const arrayText = match values {
+[first, ...rest] => "${first}:${rest[1]}",
+_ => "none"
+}
+const exactText = match ["x", "y"] {
+["x", second] => second,
+_ => "none"
+}
+const aliasText = match "ok" {
+"ok" as matched => matched,
+_ => "no"
+}
+"#,
+        "printf '%s|%s|%s\\n' \"$arrayText\" \"$exactText\" \"$aliasText\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "a:c|y|ok\n");
 }
 
 #[test]

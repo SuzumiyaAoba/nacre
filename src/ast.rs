@@ -128,10 +128,11 @@ pub struct Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindingPattern {
-    Tuple(Vec<String>),
-    Record(Vec<(String, String)>),
+    Name(String),
+    Tuple(Vec<BindingPattern>),
+    Record(Vec<(String, BindingPattern)>),
     Array {
-        names: Vec<String>,
+        patterns: Vec<BindingPattern>,
         rest: Option<String>,
     },
 }
@@ -266,6 +267,14 @@ pub enum Expr {
     Map(Vec<(Expr, Expr)>),
     Record(Vec<(String, Expr)>),
     RecordPattern(Vec<(String, Option<Expr>)>),
+    ArrayPattern {
+        patterns: Vec<Expr>,
+        rest: Option<String>,
+    },
+    AliasPattern {
+        pattern: Box<Expr>,
+        alias: String,
+    },
     Tuple(Vec<Expr>),
     Index {
         name: String,

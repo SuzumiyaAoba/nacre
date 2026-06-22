@@ -514,38 +514,44 @@ fn with_local(local_names: &HashSet<String>, name: &str) -> HashSet<String> {
 }
 
 fn binding_pattern_names(pattern: &BindingPattern) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_binding_pattern_names(pattern, &mut names);
+    names
+}
+
+fn collect_binding_pattern_names(pattern: &BindingPattern, names: &mut Vec<String>) {
     match pattern {
-        BindingPattern::Tuple(names) => names.iter().filter(|name| *name != "_").cloned().collect(),
-        BindingPattern::Array { names, rest } => names
-            .iter()
-            .chain(rest.iter())
-            .filter(|name| *name != "_")
-            .cloned()
-            .collect(),
-        BindingPattern::Record(bindings) => bindings
-            .iter()
-            .filter(|(_, name)| name != "_")
-            .map(|(_, name)| name.clone())
-            .collect(),
+        BindingPattern::Name(name) if name != "_" => names.push(name.clone()),
+        BindingPattern::Name(_) => {}
+        BindingPattern::Tuple(values) => {
+            for value in values {
+                collect_binding_pattern_names(value, names);
+            }
+        }
+        BindingPattern::Array { patterns, rest } => {
+            for value in patterns {
+                collect_binding_pattern_names(value, names);
+            }
+            if let Some(rest) = rest.as_ref().filter(|name| *name != "_") {
+                names.push(rest.clone());
+            }
+        }
+        BindingPattern::Record(bindings) => {
+            for (_, pattern) in bindings {
+                collect_binding_pattern_names(pattern, names);
+            }
+        }
     }
 }
 
 fn collect_match_pattern_names(pattern: &Expr, local_names: &mut HashSet<String>) {
     match pattern {
         Expr::Some(value) | Expr::Ok(value) | Expr::Err(value) => {
-            if let Expr::Ident(name) = &**value {
-                if name != "_" {
-                    local_names.insert(name.clone());
-                }
-            }
+            collect_match_pattern_names(value, local_names);
         }
         Expr::Tuple(values) => {
             for value in values {
-                if let Expr::Ident(name) = value {
-                    if name != "_" {
-                        local_names.insert(name.clone());
-                    }
-                }
+                collect_match_pattern_names(value, local_names);
             }
         }
         Expr::RecordPattern(fields) => {
@@ -561,14 +567,27 @@ fn collect_match_pattern_names(pattern: &Expr, local_names: &mut HashSet<String>
                 }
             }
         }
+        Expr::ArrayPattern { patterns, rest } => {
+            for value in patterns {
+                collect_match_pattern_names(value, local_names);
+            }
+            if let Some(rest) = rest.as_ref().filter(|name| *name != "_") {
+                local_names.insert(rest.clone());
+            }
+        }
+        Expr::AliasPattern { pattern, alias } => {
+            collect_match_pattern_names(pattern, local_names);
+            if alias != "_" {
+                local_names.insert(alias.clone());
+            }
+        }
         Expr::Call { args, .. } | Expr::Variant { args, .. } => {
             for value in args {
-                if let Expr::Ident(name) = value {
-                    if name != "_" {
-                        local_names.insert(name.clone());
-                    }
-                }
+                collect_match_pattern_names(value, local_names);
             }
+        }
+        Expr::Ident(name) if name != "_" => {
+            local_names.insert(name.clone());
         }
         Expr::NamedArg { value, .. } => collect_match_pattern_names(value, local_names),
         _ => {}
@@ -582,16 +601,19 @@ fn namespace_pattern(
     top_level: bool,
 ) -> BindingPattern {
     match pattern {
+        BindingPattern::Name(name) => {
+            BindingPattern::Name(qualify_decl_name(name, namespace, binding_names, top_level))
+        }
         BindingPattern::Tuple(names) => BindingPattern::Tuple(
             names
                 .iter()
-                .map(|name| qualify_decl_name(name, namespace, binding_names, top_level))
+                .map(|pattern| namespace_pattern(pattern, namespace, binding_names, top_level))
                 .collect(),
         ),
-        BindingPattern::Array { names, rest } => BindingPattern::Array {
-            names: names
+        BindingPattern::Array { patterns, rest } => BindingPattern::Array {
+            patterns: patterns
                 .iter()
-                .map(|name| qualify_decl_name(name, namespace, binding_names, top_level))
+                .map(|pattern| namespace_pattern(pattern, namespace, binding_names, top_level))
                 .collect(),
             rest: rest
                 .as_ref()
@@ -603,7 +625,7 @@ fn namespace_pattern(
                 .map(|(field, name)| {
                     (
                         field.clone(),
-                        qualify_decl_name(name, namespace, binding_names, top_level),
+                        namespace_pattern(name, namespace, binding_names, top_level),
                     )
                 })
                 .collect(),
@@ -789,6 +811,22 @@ fn namespace_expr(
                 })
                 .collect(),
         ),
+        Expr::ArrayPattern { patterns, rest } => Expr::ArrayPattern {
+            patterns: patterns
+                .iter()
+                .map(|value| namespace_expr(value, context, local_names, local_type_names))
+                .collect(),
+            rest: rest.clone(),
+        },
+        Expr::AliasPattern { pattern, alias } => Expr::AliasPattern {
+            pattern: Box::new(namespace_expr(
+                pattern,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            alias: alias.clone(),
+        },
         Expr::Tuple(values) => Expr::Tuple(
             values
                 .iter()

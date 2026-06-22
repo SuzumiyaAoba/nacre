@@ -279,6 +279,9 @@ pub(super) fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(Strin
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
         Expr::NamedArg { .. } => unreachable!("named arguments are lowered before emission"),
         Expr::Closure { name, captures } => emit_closure(out, name, captures),
+        Expr::ArrayPattern { .. } | Expr::AliasPattern { .. } => {
+            unreachable!("match patterns are only emitted by the match emitter")
+        }
         Expr::Lambda { .. } => unreachable!("lambdas are lowered before emission"),
     }
 }

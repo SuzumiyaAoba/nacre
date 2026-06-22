@@ -822,21 +822,18 @@ fn emit_for_body(out: &mut String, binding: &ForBinding, body: &Program, scope: 
 
 fn emit_for_item_destructure(out: &mut String, pattern: &BindingPattern, local: bool) {
     match pattern {
-        BindingPattern::Tuple(names) => {
-            for (index, name) in names.iter().enumerate() {
-                emit_scalar_assignment_prefix(out, name, false, local);
-                out.push_str("\"$(__nacre_tuple_field \"$__nacre_for_item\" ");
-                out.push_str(&(index + 1).to_string());
-                out.push_str(")\"\n");
-            }
+        BindingPattern::Name(name) => {
+            emit_scalar_assignment_prefix(out, name, false, local);
+            out.push_str("\"$__nacre_for_item\"\n");
         }
-        BindingPattern::Record(bindings) => {
-            for (field, name) in bindings {
-                emit_scalar_assignment_prefix(out, name, false, local);
-                out.push_str("\"$(__nacre_record_field \"$__nacre_for_item\" ");
-                emit_shell_word(out, field);
-                out.push_str(")\"\n");
-            }
+        BindingPattern::Tuple(_) | BindingPattern::Record(_) => {
+            emit_destructure(
+                out,
+                pattern,
+                &Expr::Ident("__nacre_for_item".into()),
+                false,
+                local,
+            );
         }
         BindingPattern::Array { .. } => {
             emit_for_item_array_destructure(out, pattern, local);
@@ -845,14 +842,19 @@ fn emit_for_item_destructure(out: &mut String, pattern: &BindingPattern, local: 
 }
 
 fn emit_for_item_array_destructure(out: &mut String, pattern: &BindingPattern, local: bool) {
-    let BindingPattern::Array { names, rest } = pattern else {
+    let BindingPattern::Array { patterns, rest } = pattern else {
         return;
     };
-    for (index, name) in names.iter().enumerate() {
-        emit_scalar_assignment_prefix(out, name, false, local);
-        out.push_str("\"$(__nacre_array_field \"$__nacre_for_item\" ");
+    for (index, pattern) in patterns.iter().enumerate() {
+        let temp = format!("__nacre_for_array_field_{index}");
+        if local {
+            out.push_str("local ");
+        }
+        out.push_str(&temp);
+        out.push_str("=\"$(__nacre_array_field \"$__nacre_for_item\" ");
         out.push_str(&index.to_string());
         out.push_str(")\"\n");
+        emit_destructure(out, pattern, &Expr::Ident(temp), false, local);
     }
     if let Some(rest) = rest {
         if rest == "_" {
@@ -866,7 +868,7 @@ fn emit_for_item_array_destructure(out: &mut String, pattern: &BindingPattern, l
         out.push_str("eval \"$(__nacre_array_rest_decl \"$__nacre_for_item\" ");
         emit_shell_word(out, rest);
         out.push(' ');
-        out.push_str(&names.len().to_string());
+        out.push_str(&patterns.len().to_string());
         out.push_str(")\"\n");
     }
 }
@@ -1805,25 +1807,26 @@ fn emit_destructure(
     local: bool,
 ) {
     match pattern {
-        BindingPattern::Array { names, rest } => {
-            for (index, name) in names.iter().enumerate() {
+        BindingPattern::Name(name) => emit_binding(out, name, expr, readonly, local),
+        BindingPattern::Array { patterns, rest } => {
+            for (index, pattern) in patterns.iter().enumerate() {
                 let value = destructured_array_value(expr, index);
-                emit_binding(out, name, &value, readonly, local);
+                emit_destructure(out, pattern, &value, readonly, local);
             }
             if let Some(rest) = rest {
-                emit_array_rest_binding(out, rest, expr, names.len(), readonly, local);
+                emit_array_rest_binding(out, rest, expr, patterns.len(), readonly, local);
             }
         }
-        BindingPattern::Tuple(names) => {
-            for (index, name) in names.iter().enumerate() {
+        BindingPattern::Tuple(patterns) => {
+            for (index, pattern) in patterns.iter().enumerate() {
                 let value = destructured_tuple_value(expr, index + 1);
-                emit_binding(out, name, &value, readonly, local);
+                emit_destructure(out, pattern, &value, readonly, local);
             }
         }
         BindingPattern::Record(bindings) => {
-            for (field, name) in bindings {
+            for (field, pattern) in bindings {
                 let value = destructured_record_value(expr, field);
-                emit_binding(out, name, &value, readonly, local);
+                emit_destructure(out, pattern, &value, readonly, local);
             }
         }
     }
@@ -1832,8 +1835,20 @@ fn emit_destructure(
 fn destructured_array_value(expr: &Expr, index: usize) -> Expr {
     match expr {
         Expr::Array(values) => values.get(index).cloned().unwrap_or(Expr::Unit),
+        Expr::Ident(name) if is_packed_destructure_source(name) => Expr::IndexValue {
+            value: Box::new(Expr::Ident(name.clone())),
+            index: Box::new(Expr::Int(index as i64)),
+        },
         Expr::Ident(name) => Expr::Index {
             name: name.clone(),
+            index: Box::new(Expr::Int(index as i64)),
+        },
+        Expr::Field { name, field } => Expr::Index {
+            name: format!("{name}_{field}"),
+            index: Box::new(Expr::Int(index as i64)),
+        },
+        Expr::TupleField { name, field } => Expr::Index {
+            name: format!("{name}_{field}"),
             index: Box::new(Expr::Int(index as i64)),
         },
         Expr::Slice { name, start, .. } => Expr::Index {
@@ -1844,8 +1859,8 @@ fn destructured_array_value(expr: &Expr, index: usize) -> Expr {
                 right: Box::new(Expr::Int(index as i64)),
             }),
         },
-        _ => Expr::Index {
-            name: destructure_source_name(expr),
+        _ => Expr::IndexValue {
+            value: Box::new(expr.clone()),
             index: Box::new(Expr::Int(index as i64)),
         },
     }
@@ -1888,6 +1903,49 @@ fn emit_array_rest_binding(
         );
         return;
     }
+    if let Expr::Field {
+        name: source,
+        field: source_field,
+    } = expr
+    {
+        let source = format!("{source}_{source_field}");
+        let end = Expr::Len(source.clone());
+        emit_array_slice_binding(
+            out,
+            name,
+            &source,
+            &Expr::Int(start as i64),
+            &end,
+            readonly,
+            local,
+        );
+        return;
+    }
+    if let Expr::TupleField {
+        name: source,
+        field: source_field,
+    } = expr
+    {
+        let source = format!("{source}_{source_field}");
+        let end = Expr::Len(source.clone());
+        emit_array_slice_binding(
+            out,
+            name,
+            &source,
+            &Expr::Int(start as i64),
+            &end,
+            readonly,
+            local,
+        );
+        return;
+    }
+
+    if !matches!(expr, Expr::Ident(_) | Expr::Slice { .. })
+        || matches!(expr, Expr::Ident(name) if is_packed_destructure_source(name))
+    {
+        emit_array_rest_value_binding(out, name, expr, start, readonly, local);
+        return;
+    }
 
     if local {
         out.push_str("local -a ");
@@ -1902,15 +1960,60 @@ fn emit_array_rest_binding(
     out.push_str("}\")\n");
 }
 
+fn emit_array_rest_value_binding(
+    out: &mut String,
+    name: &str,
+    expr: &Expr,
+    start: usize,
+    readonly: bool,
+    local: bool,
+) {
+    if local {
+        out.push_str("local -a ");
+        out.push_str(name);
+        out.push('\n');
+    }
+    out.push_str("eval \"$(__nacre_array_rest_decl ");
+    emit_expr(out, expr);
+    out.push(' ');
+    emit_shell_word(out, name);
+    out.push(' ');
+    out.push_str(&start.to_string());
+    out.push_str(")\"\n");
+    if readonly && !local {
+        out.push_str("readonly -a ");
+        out.push_str(name);
+        out.push('\n');
+    }
+}
+
 fn destructured_tuple_value(expr: &Expr, field: usize) -> Expr {
     match expr {
         Expr::Tuple(values) => values[field - 1].clone(),
+        Expr::Ident(name) if is_packed_destructure_source(name) => Expr::TupleFieldValue {
+            value: Box::new(Expr::Ident(name.clone())),
+            field,
+        },
         Expr::Ident(name) => Expr::TupleField {
             name: name.clone(),
             field,
         },
-        _ => Expr::TupleField {
-            name: destructure_source_name(expr),
+        Expr::Field {
+            name,
+            field: source_field,
+        } => Expr::TupleField {
+            name: format!("{name}_{source_field}"),
+            field,
+        },
+        Expr::TupleField {
+            name,
+            field: source_field,
+        } => Expr::TupleField {
+            name: format!("{name}_{source_field}"),
+            field,
+        },
+        _ => Expr::TupleFieldValue {
+            value: Box::new(expr.clone()),
             field,
         },
     }
@@ -1923,15 +2026,37 @@ fn destructured_record_value(expr: &Expr, field: &str) -> Expr {
             .find(|(name, _)| name == field)
             .map(|(_, value)| value.clone())
             .unwrap_or_else(|| Expr::Unit),
+        Expr::Ident(name) if is_packed_destructure_source(name) => Expr::FieldValue {
+            value: Box::new(Expr::Ident(name.clone())),
+            field: field.to_string(),
+        },
         Expr::Ident(name) => Expr::Field {
             name: name.clone(),
             field: field.to_string(),
         },
-        _ => Expr::Field {
-            name: destructure_source_name(expr),
+        Expr::Field {
+            name,
+            field: source_field,
+        } => Expr::Field {
+            name: format!("{name}_{source_field}"),
+            field: field.to_string(),
+        },
+        Expr::TupleField {
+            name,
+            field: source_field,
+        } => Expr::Field {
+            name: format!("{name}_{source_field}"),
+            field: field.to_string(),
+        },
+        _ => Expr::FieldValue {
+            value: Box::new(expr.clone()),
             field: field.to_string(),
         },
     }
+}
+
+fn is_packed_destructure_source(name: &str) -> bool {
+    name == "__nacre_for_item" || name.starts_with("__nacre_for_array_field_")
 }
 
 fn destructure_source_name(expr: &Expr) -> String {
@@ -2282,6 +2407,9 @@ fn emit_discard_expr(out: &mut String, expr: &Expr) {
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
         Expr::NamedArg { .. } => unreachable!("named arguments are lowered before emission"),
         Expr::Closure { name, captures } => emit_closure(out, name, captures),
+        Expr::ArrayPattern { .. } | Expr::AliasPattern { .. } => {
+            unreachable!("match patterns are only emitted by the match emitter")
+        }
         Expr::Lambda { .. } => unreachable!("lambdas are lowered before emission"),
     }
 }
@@ -2691,6 +2819,9 @@ fn emit_expr(out: &mut String, expr: &Expr) {
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
         Expr::NamedArg { .. } => unreachable!("named arguments are lowered before emission"),
         Expr::Closure { name, captures } => emit_closure(out, name, captures),
+        Expr::ArrayPattern { .. } | Expr::AliasPattern { .. } => {
+            unreachable!("match patterns are only emitted by the match emitter")
+        }
         Expr::Lambda { .. } => unreachable!("lambdas are lowered before emission"),
     }
 }
@@ -3180,7 +3311,11 @@ fn emit_tuple_field_value(out: &mut String, value: &Expr, field: usize) {
             return;
         }
     }
+    out.push_str("\"$(__nacre_tuple_field ");
     emit_expr(out, value);
+    out.push(' ');
+    out.push_str(&field.to_string());
+    out.push_str(")\"");
 }
 
 fn emit_variable_ref(out: &mut String, name: &str) {
@@ -3496,7 +3631,11 @@ fn emit_field_value(out: &mut String, value: &Expr, field: &str) {
             return;
         }
     }
+    out.push_str("\"$(__nacre_record_field ");
     emit_expr(out, value);
+    out.push(' ');
+    emit_shell_word(out, field);
+    out.push_str(")\"");
 }
 
 fn emit_index(out: &mut String, name: &str, index: &Expr) {
@@ -3523,7 +3662,12 @@ fn emit_index_value(out: &mut String, value: &Expr, index: &Expr) {
             emit_index_expr(out, index);
             out.push_str("]}\"");
         }
-        _ => emit_expr(out, value),
+        _ => {
+            out.push_str("__nacre_index_value=");
+            emit_expr(out, value);
+            out.push_str("; __nacre_array_field \"$__nacre_index_value\" ");
+            emit_index_expr(out, index);
+        }
     }
     out.push(')');
 }
@@ -6006,6 +6150,8 @@ fn emit_array_element(out: &mut String, expr: &Expr) {
         | Expr::Range { .. }
         | Expr::Map(_)
         | Expr::RecordPattern(_)
+        | Expr::ArrayPattern { .. }
+        | Expr::AliasPattern { .. }
         | Expr::Binary { .. }
         | Expr::LetIn { .. } => emit_expr(out, expr),
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),
@@ -6294,6 +6440,8 @@ fn emit_call_arg(out: &mut String, arg: &Expr) {
         | Expr::Tuple(_)
         | Expr::Record(_)
         | Expr::RecordPattern(_)
+        | Expr::ArrayPattern { .. }
+        | Expr::AliasPattern { .. }
         | Expr::Binary { .. }
         | Expr::LetIn { .. } => emit_expr(out, arg),
         Expr::Do { .. } => unreachable!("do expressions are lowered before emission"),

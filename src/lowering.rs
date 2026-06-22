@@ -310,6 +310,17 @@ fn lower_expr(expr: &Expr, functions: &HashSet<String>) -> Expr {
                 })
                 .collect(),
         ),
+        Expr::ArrayPattern { patterns, rest } => Expr::ArrayPattern {
+            patterns: patterns
+                .iter()
+                .map(|value| lower_expr(value, functions))
+                .collect(),
+            rest: rest.clone(),
+        },
+        Expr::AliasPattern { pattern, alias } => Expr::AliasPattern {
+            pattern: Box::new(lower_expr(pattern, functions)),
+            alias: alias.clone(),
+        },
         Expr::Tuple(values) => Expr::Tuple(
             values
                 .iter()
