@@ -527,6 +527,46 @@ const rawId: Int = userId.value
 }
 
 #[test]
+fn generated_bash_runs_inherent_impl_associated_members() {
+    let output = run_source(
+        r#"
+newtype UserId = String
+type Token = Word(String) | Number(Int)
+
+impl UserId {
+const prefix = "usr_"
+
+fn parse(value: String): UserId {
+return UserId(value)
+}
+
+fn display(value: UserId): String {
+return value.value
+}
+}
+
+impl Token {
+fn describe(value: Token): String {
+return match value {
+Word(text) => text,
+Number(number) => "${number}"
+}
+}
+}
+
+const id = UserId.parse(UserId.prefix ++ "1")
+const text = id.display()
+const numberToken = Number(7)
+const number = numberToken.describe()
+"#,
+        "printf '%s|%s\\n' \"$text\" \"$number\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "usr_1|7\n");
+}
+
+#[test]
 fn generated_bash_runs_options_results_and_do_expressions() {
     let output = run_source(
         r#"
@@ -746,6 +786,14 @@ fn make(value: String): String {
 return "module:${value}"
 }
 const defaultValue = "default"
+newtype UserId = String
+impl UserId {
+const prefix = "u-"
+
+fn parse(value: String): UserId {
+return UserId(value)
+}
+}
 "#,
     )
     .unwrap();
@@ -755,14 +803,15 @@ const defaultValue = "default"
         r#"
 use lib.values as vals
 const aliased = vals.make(vals.defaultValue)
-const result = aliased
+const importedId = vals.UserId.parse(vals.UserId.prefix ++ "1")
+const result = aliased ++ ":" ++ importedId.value
 "#,
     )
     .unwrap();
 
     let output = run_file(&main, "printf '%s\\n' \"$result\"");
     fs::remove_dir_all(root).unwrap();
-    assert_eq!(stdout(output), "module:default\n");
+    assert_eq!(stdout(output), "module:default:u-1\n");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use crate::{
-    BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplMethod, MatchArm, Param,
-    Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplConst, ImplMethod,
+    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 #[derive(Debug)]
@@ -28,6 +28,12 @@ struct FunctionHead {
 enum TypeDeclaration {
     Alias(Type),
     Sum(Vec<VariantDecl>),
+}
+
+#[derive(Debug)]
+enum ImplItem {
+    Const(ImplConst),
+    Method(ImplMethod),
 }
 
 #[derive(Debug)]
@@ -427,6 +433,26 @@ fn validate_program(program: &Program) -> Result<(), CompileError> {
                 for_type, methods, ..
             } => {
                 validate_type(for_type, *line)?;
+                for method in methods {
+                    for param in &method.params {
+                        validate_type(&param.ty, *line)?;
+                    }
+                    validate_type(&method.return_type, *line)?;
+                    validate_program(&method.body)?;
+                }
+            }
+            Statement::InherentImpl {
+                for_type,
+                consts,
+                methods,
+            } => {
+                validate_type(for_type, *line)?;
+                for value in consts {
+                    if let Some(annotation) = &value.annotation {
+                        validate_type(annotation, *line)?;
+                    }
+                    validate_expr(&value.expr, *line)?;
+                }
                 for method in methods {
                     for param in &method.params {
                         validate_type(&param.ty, *line)?;
@@ -1832,6 +1858,34 @@ peg::parser! {
                     methods: methods.unwrap_or_default(),
                 }
             }
+            / "impl" hws1() for_type:type_expr()
+              hws() "{" line_tail() newline()+ file_trivia()
+              items:(impl_item() ** statement_separator())? file_trivia() hws() "}"
+            {
+                let mut consts = Vec::new();
+                let mut methods = Vec::new();
+                for item in items.unwrap_or_default() {
+                    match item {
+                        ImplItem::Const(value) => consts.push(value),
+                        ImplItem::Method(value) => methods.push(value),
+                    }
+                }
+                Statement::InherentImpl {
+                    for_type,
+                    consts,
+                    methods,
+                }
+            }
+
+        rule impl_item() -> ImplItem
+            = value:impl_const() { ImplItem::Const(value) }
+            / value:impl_method() { ImplItem::Method(value) }
+
+        rule impl_const() -> ImplConst
+            = hws() "const" hws1() name:identifier()
+              annotation:(hws() ":" hws() ty:type_expr() { ty })?
+              hws() "=" hws() expr:expression()
+            { ImplConst { name, annotation, expr } }
 
         rule impl_method() -> ImplMethod
             = hws() "fn" hws1() head:function_signature() hws() "{"

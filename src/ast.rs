@@ -14,6 +14,11 @@ pub enum Statement {
         for_type: Type,
         methods: Vec<ImplMethod>,
     },
+    InherentImpl {
+        for_type: Type,
+        consts: Vec<ImplConst>,
+        methods: Vec<ImplMethod>,
+    },
     TypeAlias {
         name: String,
         type_params: Vec<String>,
@@ -156,6 +161,13 @@ pub struct ImplMethod {
     pub params: Vec<Param>,
     pub return_type: Type,
     pub body: Program,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplConst {
+    pub name: String,
+    pub annotation: Option<Type>,
+    pub expr: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use crate::policy::ExecutionPolicy;
 use crate::{
-    BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ForBinding, ImplMethod,
-    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ForBinding, ImplConst,
+    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 pub fn type_check(program: &Program) -> Result<(), CompileError> {
@@ -200,6 +200,7 @@ struct TypeChecker {
     traits: HashMap<String, TraitSig>,
     trait_impls: HashSet<(String, String)>,
     method_impls: HashMap<(String, String), Vec<(String, String)>>,
+    inherent_methods: HashMap<(String, String), String>,
     functions: HashMap<String, FunctionSig>,
     sum_types: HashMap<String, Vec<String>>,
     variants: HashMap<String, VariantSig>,
@@ -293,6 +294,16 @@ fn collect_statement_function_refs(
     match statement {
         Statement::Function { body, .. } => collect_program_function_refs(body, functions, refs),
         Statement::Impl { methods, .. } => {
+            for method in methods {
+                collect_program_function_refs(&method.body, functions, refs);
+            }
+        }
+        Statement::InherentImpl {
+            consts, methods, ..
+        } => {
+            for value in consts {
+                collect_expr_function_refs(&value.expr, functions, refs);
+            }
             for method in methods {
                 collect_program_function_refs(&method.body, functions, refs);
             }
@@ -669,6 +680,7 @@ impl TypeChecker {
             traits: HashMap::new(),
             trait_impls: HashSet::new(),
             method_impls: HashMap::new(),
+            inherent_methods: HashMap::new(),
             functions: HashMap::new(),
             sum_types: HashMap::new(),
             variants: HashMap::new(),
@@ -1269,6 +1281,19 @@ impl TypeChecker {
                     methods: lowered_methods,
                 })
             }
+            Statement::InherentImpl {
+                for_type,
+                consts,
+                methods,
+            } => {
+                let (lowered_consts, lowered_methods) =
+                    self.define_inherent_impl(for_type, consts, methods, line)?;
+                Ok(Statement::InherentImpl {
+                    for_type: self.resolve_type(for_type, line)?,
+                    consts: lowered_consts,
+                    methods: lowered_methods,
+                })
+            }
             Statement::TypeAlias {
                 name,
                 type_params,
@@ -1558,6 +1583,13 @@ impl TypeChecker {
                 methods,
             } => self
                 .define_trait_impl(trait_name, for_type, methods, line)
+                .map(|_| ()),
+            Statement::InherentImpl {
+                for_type,
+                consts,
+                methods,
+            } => self
+                .define_inherent_impl(for_type, consts, methods, line)
                 .map(|_| ()),
             Statement::TypeAlias {
                 name,
@@ -2447,6 +2479,106 @@ impl TypeChecker {
             ));
         }
         self.check_impl_methods(trait_name, &trait_sig, &resolved, methods, line)
+    }
+
+    fn define_inherent_impl(
+        &mut self,
+        for_type: &Type,
+        consts: &[ImplConst],
+        methods: &[ImplMethod],
+        line: usize,
+    ) -> Result<(Vec<ImplConst>, Vec<ImplMethod>), CompileError> {
+        let resolved = self.resolve_type(for_type, line)?;
+        let type_name = resolved.name();
+        let mut seen_consts = HashSet::new();
+        let mut seen_methods = HashSet::new();
+        let mut lowered_consts = Vec::new();
+        for value in consts {
+            if !seen_consts.insert(value.name.clone()) {
+                return Err(CompileError::new(
+                    line,
+                    format!("associated const `{}` is already defined", value.name),
+                ));
+            }
+            let lowered_name = associated_const_name(&type_name, &value.name);
+            if self.bindings.contains_key(&lowered_name)
+                || self.functions.contains_key(&lowered_name)
+            {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "associated const `{}` conflicts with an existing declaration",
+                        value.name
+                    ),
+                ));
+            }
+            let actual = self.binding_expr_type(value.annotation.as_ref(), &value.expr, line)?;
+            let binding_ty =
+                self.check_annotation(value.annotation.clone(), actual, &value.expr, line)?;
+            let expr = self.lower_expr_expected(&value.expr, &binding_ty, line)?;
+            self.define(&lowered_name, binding_ty, false, line)?;
+            lowered_consts.push(ImplConst {
+                name: lowered_name,
+                annotation: value.annotation.clone(),
+                expr,
+            });
+        }
+        let mut lowered_methods = Vec::new();
+        for method in methods {
+            if !seen_methods.insert(method.name.clone()) {
+                return Err(CompileError::new(
+                    line,
+                    format!("inherent method `{}` is already defined", method.name),
+                ));
+            }
+            let lowered_name = associated_method_name(&type_name, &method.name);
+            if self.functions.contains_key(&lowered_name)
+                || self.bindings.contains_key(&lowered_name)
+            {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "associated function `{}` conflicts with an existing declaration",
+                        method.name
+                    ),
+                ));
+            }
+            self.check_function(
+                FunctionDecl {
+                    name: &lowered_name,
+                    override_constructor: false,
+                    type_params: &[],
+                    params: &method.params,
+                    return_type: &method.return_type,
+                    body: &method.body,
+                },
+                line,
+            )?;
+            if let Some(receiver) = method.params.first() {
+                let receiver_ty = self.resolve_type(&receiver.ty, line)?;
+                if self.is_assignable(&resolved, &receiver_ty, &Expr::Unit)
+                    || self.is_assignable(&receiver_ty, &resolved, &Expr::Unit)
+                {
+                    self.inherent_methods
+                        .insert((method.name.clone(), resolved.name()), lowered_name.clone());
+                }
+            }
+            let body = self.lower_function_body(
+                &lowered_name,
+                &[],
+                &method.params,
+                &method.return_type,
+                &method.body,
+                line,
+            )?;
+            lowered_methods.push(ImplMethod {
+                name: lowered_name,
+                params: method.params.clone(),
+                return_type: method.return_type.clone(),
+                body,
+            });
+        }
+        Ok((lowered_consts, lowered_methods))
     }
 
     fn check_impl_methods(
@@ -3402,10 +3534,17 @@ impl TypeChecker {
                 value: Box::new(self.lower_expr(value, line)?),
                 field: *field,
             }),
-            Expr::FieldValue { value, field } => Ok(Expr::FieldValue {
-                value: Box::new(self.lower_expr(value, line)?),
-                field: field.clone(),
-            }),
+            Expr::FieldValue { value, field } => {
+                if let Some(name) = qualified_expr_name(value) {
+                    if self.bindings.contains_key(&associated_const_name(&name, field)) {
+                        return Ok(Expr::Ident(associated_const_name(&name, field)));
+                    }
+                }
+                Ok(Expr::FieldValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    field: field.clone(),
+                })
+            }
             Expr::Slice { name, start, end } => {
                 let start = Box::new(self.lower_expr(start, line)?);
                 let end = Box::new(self.lower_expr(end, line)?);
@@ -4157,6 +4296,11 @@ impl TypeChecker {
                 let qualified = format!("{name}.{field}");
                 if self.functions.contains_key(&qualified) {
                     Ok(Expr::Ident(qualified))
+                } else if self
+                    .bindings
+                    .contains_key(&associated_const_name(name, field))
+                {
+                    Ok(Expr::Ident(associated_const_name(name, field)))
                 } else if self.bindings.contains_key(&module_binding_name(name, field)) {
                     Ok(Expr::Ident(module_binding_name(name, field)))
                 } else {
@@ -4393,6 +4537,12 @@ impl TypeChecker {
         line: usize,
     ) -> Result<String, CompileError> {
         let receiver_ty = self.check_expr(&Expr::Ident(receiver.to_string()), line)?;
+        if let Some(name) = self
+            .inherent_methods
+            .get(&(method.to_string(), receiver_ty.name()))
+        {
+            return Ok(name.clone());
+        }
         if let Some(candidates) = self
             .method_impls
             .get(&(method.to_string(), receiver_ty.name()))
@@ -4435,6 +4585,12 @@ impl TypeChecker {
             return Ok(None);
         };
         let receiver_ty = self.check_expr(receiver, line)?;
+        if let Some(name) = self
+            .inherent_methods
+            .get(&(method.to_string(), receiver_ty.name()))
+        {
+            return Ok(Some(name.clone()));
+        }
         let Some(candidates) = self
             .method_impls
             .get(&(method.to_string(), receiver_ty.name()))
@@ -7650,6 +7806,9 @@ impl TypeChecker {
             if let Some(sig) = self.functions.get(&qualified) {
                 return Ok(sig.function_type());
             }
+            if let Some(binding) = self.lookup_binding(&associated_const_name(name, field)) {
+                return Ok(binding.ty);
+            }
             if let Some(binding) = self.lookup_binding(&module_binding_name(name, field)) {
                 return Ok(binding.ty);
             }
@@ -7683,6 +7842,11 @@ impl TypeChecker {
         line: usize,
     ) -> Result<Type, CompileError> {
         if !matches!(value, Expr::Record(_)) {
+            if let Some(name) = qualified_expr_name(value) {
+                if let Some(binding) = self.lookup_binding(&associated_const_name(&name, field)) {
+                    return Ok(binding.ty);
+                }
+            }
             let ty = self.check_expr(value, line)?;
             return Err(CompileError::new(
                 line,
@@ -9626,6 +9790,37 @@ fn argument_count(count: usize) -> String {
 
 fn module_binding_name(module: &str, name: &str) -> String {
     format!("{module}_{name}")
+}
+
+fn associated_const_name(type_name: &str, name: &str) -> String {
+    format!("{}_{}", shell_safe_name(type_name), name)
+}
+
+fn associated_method_name(type_name: &str, name: &str) -> String {
+    format!("{type_name}.{name}")
+}
+
+fn qualified_expr_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name) => Some(name.clone()),
+        Expr::Field { name, field } => Some(format!("{name}.{field}")),
+        Expr::FieldValue { value, field } => {
+            qualified_expr_name(value).map(|name| format!("{name}.{field}"))
+        }
+        _ => None,
+    }
+}
+
+fn shell_safe_name(name: &str) -> String {
+    name.chars()
+        .map(|ch| {
+            if ch == '_' || ch.is_ascii_alphanumeric() {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn applied_nominal_name(

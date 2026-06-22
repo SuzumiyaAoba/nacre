@@ -117,6 +117,7 @@ pub(super) fn statement_flow(statement: &Statement) -> FlowSummary {
         | Statement::Use { .. }
         | Statement::Trait { .. }
         | Statement::Impl { .. }
+        | Statement::InherentImpl { .. }
         | Statement::TypeAlias { .. }
         | Statement::SumType { .. }
         | Statement::Newtype { .. }

@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplMethod, MatchArm, Param, Program,
-    Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplConst, ImplMethod, MatchArm,
+    Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 struct NamespaceContext<'a> {
@@ -302,6 +302,59 @@ fn namespace_statement(
                             name: param.name.clone(),
                             ty: namespace_type(&param.ty, namespace, type_names, local_type_names),
                             default: param.default.clone(),
+                            variadic: param.variadic,
+                            capture_name: param.capture_name.clone(),
+                        })
+                        .collect(),
+                    return_type: namespace_type(
+                        &method.return_type,
+                        namespace,
+                        type_names,
+                        local_type_names,
+                    ),
+                    body: namespace_program_body(
+                        &method.body,
+                        context,
+                        &method
+                            .params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect::<HashSet<_>>(),
+                        local_type_names,
+                    ),
+                })
+                .collect(),
+        },
+        Statement::InherentImpl {
+            for_type,
+            consts,
+            methods,
+        } => Statement::InherentImpl {
+            for_type: namespace_type(for_type, namespace, type_names, local_type_names),
+            consts: consts
+                .iter()
+                .map(|value| ImplConst {
+                    name: value.name.clone(),
+                    annotation: value
+                        .annotation
+                        .as_ref()
+                        .map(|ty| namespace_type(ty, namespace, type_names, local_type_names)),
+                    expr: namespace_expr(&value.expr, context, local_names, local_type_names),
+                })
+                .collect(),
+            methods: methods
+                .iter()
+                .map(|method| ImplMethod {
+                    name: method.name.clone(),
+                    params: method
+                        .params
+                        .iter()
+                        .map(|param| Param {
+                            name: param.name.clone(),
+                            ty: namespace_type(&param.ty, namespace, type_names, local_type_names),
+                            default: param.default.as_ref().map(|default| {
+                                namespace_expr(default, context, local_names, local_type_names)
+                            }),
                             variadic: param.variadic,
                             capture_name: param.capture_name.clone(),
                         })

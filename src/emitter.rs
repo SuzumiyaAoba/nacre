@@ -98,6 +98,22 @@ fn emit_statement(out: &mut String, statement: &Statement, scope: EmitScope, def
                 emit_function(out, &method.name, &method.params, &method.body);
             }
         }
+        Statement::InherentImpl {
+            consts, methods, ..
+        } => {
+            for value in consts {
+                emit_binding(
+                    out,
+                    &value.name,
+                    &value.expr,
+                    !scope.is_loop(),
+                    scope.is_function(),
+                );
+            }
+            for method in methods {
+                emit_function(out, &method.name, &method.params, &method.body);
+            }
+        }
         Statement::TypeAlias { .. } => {}
         Statement::SumType { .. } => {}
         Statement::Newtype { .. } => {}

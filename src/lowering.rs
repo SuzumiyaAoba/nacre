@@ -34,6 +34,12 @@ fn collect_function_names(program: &Program, functions: &mut HashSet<String>) {
                     collect_function_names(&method.body, functions);
                 }
             }
+            Statement::InherentImpl { methods, .. } => {
+                for method in methods {
+                    functions.insert(method.name.clone());
+                    collect_function_names(&method.body, functions);
+                }
+            }
             Statement::Block { body } => collect_function_names(body, functions),
             Statement::Defer(statement) => collect_function_names(
                 &Program::new(vec![statement.as_ref().clone()], vec![1]),
@@ -115,6 +121,30 @@ fn lower_statement(statement: &Statement, functions: &HashSet<String>) -> Statem
         } => Statement::Impl {
             trait_name: trait_name.clone(),
             for_type: for_type.clone(),
+            methods: methods
+                .iter()
+                .map(|method| crate::ImplMethod {
+                    name: method.name.clone(),
+                    params: method.params.clone(),
+                    return_type: method.return_type.clone(),
+                    body: lower_program(&method.body, functions),
+                })
+                .collect(),
+        },
+        Statement::InherentImpl {
+            for_type,
+            consts,
+            methods,
+        } => Statement::InherentImpl {
+            for_type: for_type.clone(),
+            consts: consts
+                .iter()
+                .map(|value| crate::ImplConst {
+                    name: value.name.clone(),
+                    annotation: value.annotation.clone(),
+                    expr: lower_expr(&value.expr, functions),
+                })
+                .collect(),
             methods: methods
                 .iter()
                 .map(|method| crate::ImplMethod {

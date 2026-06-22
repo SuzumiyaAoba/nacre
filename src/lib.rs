@@ -13,8 +13,8 @@ mod policy;
 use std::path::Path;
 
 pub use ast::{
-    BinaryOp, BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplMethod, MatchArm,
-    Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    BinaryOp, BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplConst, ImplMethod,
+    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 pub use checker::{type_check, type_check_with_policy};
 pub use error::CompileError;

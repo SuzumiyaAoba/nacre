@@ -221,6 +221,18 @@ newtype Id[T] = String
 type Box[T] = Box(T)
 type Tree[T] = Leaf(T) | Branch(Tree[T], Tree[T])
 
+impl UserId {
+    const prefix = "usr_"
+
+    fn parse(value: String): UserId {
+        return UserId(value)
+    }
+
+    fn display(value: UserId): String {
+        return "${UserId.prefix}${value.value}"
+    }
+}
+
 trait Show[T] {
     fn show(value: T): String
 }
