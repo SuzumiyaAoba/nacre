@@ -291,6 +291,7 @@ fn collect_statement_function_refs(
     refs: &mut HashSet<String>,
 ) {
     match statement {
+        Statement::Export(inner) => collect_statement_function_refs(inner, functions, refs),
         Statement::Function { body, .. } => collect_program_function_refs(body, functions, refs),
         Statement::Impl { methods, .. } => {
             for method in methods {
@@ -1261,6 +1262,7 @@ impl TypeChecker {
     ) -> Result<Statement, CompileError> {
         self.require_process_args_access_in_statement(statement, line)?;
         match statement {
+            Statement::Export(inner) => self.check_and_lower_statement(inner, line),
             Statement::Use { .. } => Ok(statement.clone()),
             Statement::ExternalFunction {
                 name,
@@ -1577,6 +1579,7 @@ impl TypeChecker {
     fn check_statement(&mut self, statement: &Statement, line: usize) -> Result<(), CompileError> {
         self.require_process_args_access_in_statement(statement, line)?;
         match statement {
+            Statement::Export(inner) => self.check_statement(inner, line),
             Statement::Use { .. } => Ok(()),
             Statement::Trait {
                 name,

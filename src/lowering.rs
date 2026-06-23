@@ -11,6 +11,10 @@ pub(crate) fn lower_method_calls(program: &Program) -> Program {
 fn collect_function_names(program: &Program, functions: &mut HashSet<String>) {
     for statement in program.statements() {
         match statement {
+            Statement::Export(inner) => collect_function_names(
+                &Program::new(vec![inner.as_ref().clone()], vec![1]),
+                functions,
+            ),
             Statement::Function { name, body, .. } => {
                 functions.insert(name.clone());
                 collect_function_names(body, functions);
@@ -88,6 +92,7 @@ fn lower_program(program: &Program, functions: &HashSet<String>) -> Program {
 
 fn lower_statement(statement: &Statement, functions: &HashSet<String>) -> Statement {
     match statement {
+        Statement::Export(inner) => lower_statement(inner, functions),
         Statement::Function {
             name,
             override_constructor,

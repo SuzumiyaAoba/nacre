@@ -894,6 +894,77 @@ const result = aliased ++ ":" ++ importedId.value
 }
 
 #[test]
+fn compile_file_supports_explicit_exports_selected_imports_and_reexports() {
+    let root = temp_dir("module-exports");
+    let lib = root.join("lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(
+        lib.join("config.ncr"),
+        r#"
+export fn parse(value: String): String {
+return "parsed:${value}"
+}
+
+fn hidden(value: String): String {
+return "hidden:${value}"
+}
+
+export const defaultConfig = "default"
+const secretConfig = "secret"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        lib.join("facade.ncr"),
+        r#"
+use config.{parse as parseConfig, defaultConfig}
+export const facadeDefault = defaultConfig
+export use config.{parse as parseAgain}
+"#,
+    )
+    .unwrap();
+    let main = root.join("main.ncr");
+    fs::write(
+        &main,
+        r#"
+use lib.config.{parse as parseConfig, defaultConfig}
+use lib.facade.{facadeDefault, parseAgain}
+const result = parseConfig(defaultConfig) ++ ":" ++ facadeDefault ++ ":" ++ parseAgain("x")
+"#,
+    )
+    .unwrap();
+
+    let output = run_file(&main, "printf '%s\\n' \"$result\"");
+    assert_eq!(stdout(output), "parsed:default:default:parsed:x\n");
+
+    let private_main = root.join("private.ncr");
+    fs::write(
+        &private_main,
+        "use lib.config.{hidden}\nconst result = hidden(\"x\")\n",
+    )
+    .unwrap();
+    let error = nacre::compile_file(&private_main).unwrap_err();
+    assert!(
+        error.message().contains("does not export `hidden`"),
+        "{error}"
+    );
+
+    let private_const_main = root.join("private-const.ncr");
+    fs::write(
+        &private_const_main,
+        "use lib.config.{secretConfig}\nconst result = secretConfig\n",
+    )
+    .unwrap();
+    let error = nacre::compile_file(&private_const_main).unwrap_err();
+    assert!(
+        error.message().contains("does not export `secretConfig`"),
+        "{error}"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn compile_file_skips_policy_for_unused_imported_functions() {
     let root = temp_dir("unused-import-policy");
     let lib = root.join("lib");

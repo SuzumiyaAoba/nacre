@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{parse, CompileError, Program, Statement};
+use crate::{parse, CompileError, Program, Statement, UseItem};
 
 pub(crate) fn load_program(path: &Path) -> Result<Program, CompileError> {
     let resolver = DependencyResolver::discover(path)?;
@@ -330,12 +330,15 @@ fn parse_file_expanded(
     }
     let program = parse(&source)
         .map_err(|error| error.with_source_context(path.display().to_string(), &source))?;
-    expand_modules(
+    let expanded = expand_modules(
         program,
         path.parent().unwrap_or_else(|| Path::new(".")),
         resolver,
         seen,
-    )
+    );
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    seen.remove(&canonical);
+    expanded
 }
 
 fn expand_modules(
@@ -347,21 +350,225 @@ fn expand_modules(
     let mut statements = Vec::new();
     let mut lines = Vec::new();
     for (statement, line) in program.statements().iter().zip(program.statement_lines()) {
-        if let Statement::Use { path, alias } = statement {
+        if let Statement::Use {
+            path,
+            alias,
+            items,
+            re_export,
+        } = statement
+        {
             let module_path = resolve_module_path_with_deps(base_dir, path, *line, resolver)?;
             let module = parse_file_expanded(&module_path, resolver, seen)?;
-            let namespace = alias.as_ref().or_else(|| path.last()).ok_or_else(|| {
-                CompileError::new(*line, "module path cannot be empty".to_string())
-            })?;
-            let module = namespace::namespace_module(module, namespace);
-            statements.extend_from_slice(module.statements());
-            lines.extend_from_slice(module.statement_lines());
+            let imported = if items.is_empty() {
+                let namespace = alias.as_ref().or_else(|| path.last()).ok_or_else(|| {
+                    CompileError::new(*line, "module path cannot be empty".to_string())
+                })?;
+                namespace::namespace_module(strip_exports(module), namespace)
+            } else {
+                expand_selected_import(&module, path, items, *line)?
+            };
+            for (imported_statement, imported_line) in imported
+                .statements()
+                .iter()
+                .cloned()
+                .zip(imported.statement_lines().iter().copied())
+            {
+                statements.push(if *re_export {
+                    Statement::Export(Box::new(imported_statement))
+                } else {
+                    imported_statement
+                });
+                lines.push(imported_line);
+            }
+        } else if let Statement::Export(inner) = statement {
+            if let Statement::Use {
+                path, alias, items, ..
+            } = inner.as_ref()
+            {
+                let module_path = resolve_module_path_with_deps(base_dir, path, *line, resolver)?;
+                let module = parse_file_expanded(&module_path, resolver, seen)?;
+                let imported = if items.is_empty() {
+                    let namespace = alias.as_ref().or_else(|| path.last()).ok_or_else(|| {
+                        CompileError::new(*line, "module path cannot be empty".to_string())
+                    })?;
+                    namespace::namespace_module(strip_exports(module), namespace)
+                } else {
+                    expand_selected_import(&module, path, items, *line)?
+                };
+                for (imported_statement, imported_line) in imported
+                    .statements()
+                    .iter()
+                    .cloned()
+                    .zip(imported.statement_lines().iter().copied())
+                {
+                    statements.push(Statement::Export(Box::new(imported_statement)));
+                    lines.push(imported_line);
+                }
+            } else {
+                statements.push(Statement::Export(inner.clone()));
+                lines.push(*line);
+            }
         } else {
             statements.push(statement.clone());
             lines.push(*line);
         }
     }
     Ok(Program::new(statements, lines))
+}
+
+fn strip_exports(program: Program) -> Program {
+    Program::new(
+        program
+            .statements()
+            .iter()
+            .map(|statement| match statement {
+                Statement::Export(inner) => inner.as_ref().clone(),
+                other => other.clone(),
+            })
+            .collect(),
+        program.statement_lines().to_vec(),
+    )
+}
+
+fn expand_selected_import(
+    module: &Program,
+    path: &[String],
+    items: &[UseItem],
+    line: usize,
+) -> Result<Program, CompileError> {
+    let explicit_exports = module
+        .statements()
+        .iter()
+        .any(|statement| matches!(statement, Statement::Export(_)));
+    let mut statements = Vec::new();
+    let mut lines = Vec::new();
+    for item in items {
+        let Some((statement, statement_line)) =
+            find_imported_item(module, &item.name, explicit_exports)
+        else {
+            let module_name = path.join(".");
+            return Err(CompileError::new(
+                line,
+                format!("module `{module_name}` does not export `{}`", item.name),
+            ));
+        };
+        statements.push(rename_imported_item(
+            statement,
+            item.alias.as_deref().unwrap_or(&item.name),
+        ));
+        lines.push(statement_line);
+    }
+    Ok(Program::new(statements, lines))
+}
+
+fn find_imported_item<'a>(
+    module: &'a Program,
+    name: &str,
+    explicit_exports: bool,
+) -> Option<(&'a Statement, usize)> {
+    for (statement, line) in module.statements().iter().zip(module.statement_lines()) {
+        let candidate = match statement {
+            Statement::Export(inner) => inner.as_ref(),
+            other if !explicit_exports => other,
+            _ => continue,
+        };
+        if exported_statement_name(candidate).is_some_and(|candidate_name| candidate_name == name) {
+            return Some((candidate, *line));
+        }
+    }
+    None
+}
+
+fn exported_statement_name(statement: &Statement) -> Option<&str> {
+    match statement {
+        Statement::Function { name, .. }
+        | Statement::ExternalFunction { name, .. }
+        | Statement::TypeAlias { name, .. }
+        | Statement::SumType { name, .. }
+        | Statement::Newtype { name, .. }
+        | Statement::Trait { name, .. }
+        | Statement::Const { name, .. }
+        | Statement::Let { name, .. } => Some(name),
+        _ => None,
+    }
+}
+
+fn rename_imported_item(statement: &Statement, alias: &str) -> Statement {
+    match statement {
+        Statement::Function {
+            override_constructor,
+            type_params,
+            params,
+            return_type,
+            body,
+            ..
+        } => Statement::Function {
+            name: alias.to_string(),
+            override_constructor: *override_constructor,
+            type_params: type_params.clone(),
+            params: params.clone(),
+            return_type: return_type.clone(),
+            body: body.clone(),
+        },
+        Statement::ExternalFunction {
+            type_params,
+            params,
+            return_type,
+            ..
+        } => Statement::ExternalFunction {
+            name: alias.to_string(),
+            type_params: type_params.clone(),
+            params: params.clone(),
+            return_type: return_type.clone(),
+        },
+        Statement::Const {
+            annotation, expr, ..
+        } => Statement::Const {
+            name: alias.to_string(),
+            annotation: annotation.clone(),
+            expr: expr.clone(),
+        },
+        Statement::Let {
+            annotation, expr, ..
+        } => Statement::Let {
+            name: alias.to_string(),
+            annotation: annotation.clone(),
+            expr: expr.clone(),
+        },
+        Statement::TypeAlias {
+            type_params, ty, ..
+        } => Statement::TypeAlias {
+            name: alias.to_string(),
+            type_params: type_params.clone(),
+            ty: ty.clone(),
+        },
+        Statement::Newtype {
+            type_params, base, ..
+        } => Statement::Newtype {
+            name: alias.to_string(),
+            type_params: type_params.clone(),
+            base: base.clone(),
+        },
+        Statement::SumType {
+            type_params,
+            variants,
+            ..
+        } => Statement::SumType {
+            name: alias.to_string(),
+            type_params: type_params.clone(),
+            variants: variants.clone(),
+        },
+        Statement::Trait {
+            type_param,
+            methods,
+            ..
+        } => Statement::Trait {
+            name: alias.to_string(),
+            type_param: type_param.clone(),
+            methods: methods.clone(),
+        },
+        other => other.clone(),
+    }
 }
 
 #[cfg(test)]

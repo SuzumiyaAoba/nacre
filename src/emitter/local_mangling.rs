@@ -44,6 +44,7 @@ pub(super) fn mangle_function_locals(program: &Program) -> Program {
 
 fn mangle_top_level_statement(statement: &Statement) -> Statement {
     match statement {
+        Statement::Export(inner) => mangle_top_level_statement(inner),
         Statement::Function {
             name,
             override_constructor,
@@ -147,6 +148,7 @@ pub(super) fn mangle_local_statement(
     local_names: &mut HashMap<String, String>,
 ) -> Statement {
     match statement {
+        Statement::Export(inner) => mangle_local_statement(inner, mangler, local_names),
         Statement::Function { .. } | Statement::Impl { .. } => {
             mangle_top_level_statement(statement)
         }

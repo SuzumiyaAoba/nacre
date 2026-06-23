@@ -14,7 +14,8 @@ use std::path::Path;
 
 pub use ast::{
     AssignTarget, BinaryOp, BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplConst,
-    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, UseItem,
+    VariantDecl,
 };
 pub use checker::{type_check, type_check_with_policy};
 pub use error::CompileError;

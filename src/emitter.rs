@@ -92,6 +92,7 @@ impl EmitScope {
 
 fn emit_statement(out: &mut String, statement: &Statement, scope: EmitScope, defers: &[Statement]) {
     match statement {
+        Statement::Export(inner) => emit_statement(out, inner, scope, defers),
         Statement::Use { path, .. } => emit_use(out, path),
         Statement::ExternalFunction { .. } => {}
         Statement::Trait { .. } => {}

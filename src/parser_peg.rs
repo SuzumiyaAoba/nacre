@@ -1,6 +1,7 @@
 use crate::{
     AssignTarget, BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplConst,
-    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, UseItem,
+    VariantDecl,
 };
 
 #[derive(Debug)]
@@ -1713,7 +1714,8 @@ peg::parser! {
                 { ParsedStatement { offset, statement } }
 
         rule statement() -> Statement
-            = external_function_statement()
+            = export_statement()
+            / external_function_statement()
             / function_statement()
             / trait_statement()
             / impl_statement()
@@ -1769,6 +1771,19 @@ peg::parser! {
                     return_type: head.return_type,
                 }
             }
+
+        rule export_statement() -> Statement
+            = "export" hws1() statement:exportable_statement()
+            { Statement::Export(Box::new(statement)) }
+
+        rule exportable_statement() -> Statement
+            = function_statement()
+            / trait_statement()
+            / impl_statement()
+            / use_statement_inner(true)
+            / newtype_statement()
+            / type_statement()
+            / binding_statement_rule()
 
         rule function_statement() -> Statement
             = marker:("fn!" { true } / "fn" { false }) hws1()
@@ -1948,9 +1963,17 @@ peg::parser! {
             { Statement::Defer(Box::new(statement)) }
 
         rule use_statement() -> Statement
+            = use_statement_inner(false)
+
+        rule use_statement_inner(re_export: bool) -> Statement
             = "use" hws1() path:(identifier() ++ (hws() "." hws()))
+              items:(hws() "." hws() "{" ws() items:(use_item() ++ comma()) ws() "}" { items })?
               alias:(hws1() "as" hws1() name:identifier() { name })?
-            { Statement::Use { path, alias } }
+            { Statement::Use { path, alias, items: items.unwrap_or_default(), re_export } }
+
+        rule use_item() -> UseItem
+            = name:identifier() alias:(hws1() "as" hws1() alias:identifier() { alias })?
+            { UseItem { name, alias } }
 
         rule newtype_statement() -> Statement
             = "newtype" hws1() name:type_identifier()

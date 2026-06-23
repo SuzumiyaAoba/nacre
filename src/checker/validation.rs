@@ -87,6 +87,7 @@ pub(super) fn program_flow(program: &Program) -> FlowSummary {
 
 pub(super) fn statement_flow(statement: &Statement) -> FlowSummary {
     match statement {
+        Statement::Export(inner) => statement_flow(inner),
         Statement::Return(_) => FlowSummary::returned(),
         Statement::Break => FlowSummary::broke(),
         Statement::Continue => FlowSummary::continued(),

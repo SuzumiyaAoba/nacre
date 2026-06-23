@@ -296,6 +296,33 @@ use tools.format as fmt
 const shortLabel = fmt.label("nacre")
 ```
 
+Modules may mark their public API explicitly with `export`. When a module uses
+at least one explicit export, selected imports can only import exported names.
+Modules without explicit exports keep the compatibility behavior where their
+top-level declarations are importable.
+
+```nacre
+## config.ncr
+export fn parse(value: String): String {
+    return "parsed:${value}"
+}
+
+export const defaultConfig = "default"
+const privateConfig = "private"
+```
+
+```nacre
+use config.{parse as parseConfig, defaultConfig}
+
+const loaded = parseConfig(defaultConfig)
+```
+
+Modules can re-export selected declarations:
+
+```nacre
+export use config.{parse as parseConfig}
+```
+
 The dependency name becomes the first `use` segment. `use tools.format` searches
 for `../tools/format.ncr`, `../tools/format.d.ncr`, or
 `../tools/format/index.ncr`. `use tools` searches for `index.ncr` at the

@@ -3,7 +3,10 @@ pub enum Statement {
     Use {
         path: Vec<String>,
         alias: Option<String>,
+        items: Vec<UseItem>,
+        re_export: bool,
     },
+    Export(Box<Statement>),
     Trait {
         name: String,
         type_param: String,
@@ -115,6 +118,12 @@ pub enum Statement {
     Continue,
     Return(Expr),
     Raw(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UseItem {
+    pub name: String,
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

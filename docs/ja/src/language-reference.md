@@ -295,6 +295,32 @@ use tools.format as fmt
 const shortLabel = fmt.label("nacre")
 ```
 
+module は `export` で公開 API を明示できます。明示 export を少なくとも一つ持つ
+module では、selected import で取り込めるのは export された名前だけです。明示
+export を持たない module は互換性のため、従来通り top-level 宣言を import できます。
+
+```nacre
+## config.ncr
+export fn parse(value: String): String {
+    return "parsed:${value}"
+}
+
+export const defaultConfig = "default"
+const privateConfig = "private"
+```
+
+```nacre
+use config.{parse as parseConfig, defaultConfig}
+
+const loaded = parseConfig(defaultConfig)
+```
+
+selected declaration は re-export できます。
+
+```nacre
+export use config.{parse as parseConfig}
+```
+
 依存名は `use` の先頭セグメントになります。`use tools.format` は
 `../tools/format.ncr`、`../tools/format.d.ncr`、または
 `../tools/format/index.ncr` を探します。`use tools` は依存ルートの

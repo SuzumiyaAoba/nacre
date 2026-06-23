@@ -118,6 +118,7 @@ pub(super) fn program_needs_runtime(program: &Program) -> bool {
 
 fn statement_needs_runtime(statement: &Statement) -> bool {
     match statement {
+        Statement::Export(inner) => statement_needs_runtime(inner),
         Statement::Function { .. }
         | Statement::ExternalFunction { .. }
         | Statement::Impl { .. } => true,
