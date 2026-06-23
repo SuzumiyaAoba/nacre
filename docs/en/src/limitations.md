@@ -35,6 +35,8 @@ syntax.
 - Maps currently expose `keys()`, `values()`, `has(...)`, `set(...)`, and
   `remove(...)`; tuple-oriented `entries()`, `fromEntries(...)`, and
   `mapValues(...)` need a separate structured-map design.
+- Numeric helpers use Bash arithmetic and awk. Overflow behavior follows the
+  host tools rather than a fixed-width portable integer model.
 - Some structured values use compiler-provided Bash runtime helpers.
 - Diagnostics include line, column, source-line, and caret output. The CLI can
   emit a single diagnostic as JSON with `--diagnostic-format json`, but there is

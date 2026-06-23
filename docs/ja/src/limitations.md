@@ -32,6 +32,8 @@
 - Map は現在 `keys()`、`values()`、`has(...)`、`set(...)`、`remove(...)` を
   提供します。tuple ベースの `entries()`、`fromEntries(...)`、`mapValues(...)` は
   構造化 map の設計を別途決める必要があります。
+- 数値 helper は Bash 算術と awk を使います。overflow の挙動は固定幅の portable
+  integer model ではなく、ホストのツールに従います。
 - 一部の構造化された値は、コンパイラが提供する Bash ランタイムヘルパーを使います。
 - 診断には行、列、ソース行、caret 表示が含まれます。CLI では
   `--diagnostic-format json` で単一診断の JSON 出力を選べますが、専用の LSP

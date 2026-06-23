@@ -7063,17 +7063,136 @@ fn emit_array_element(out: &mut String, expr: &Expr) {
 }
 
 fn emit_call(out: &mut String, name: &str, args: &[Expr]) {
+    if emit_numeric_call(out, name, args) {
+        return;
+    }
     out.push_str("\"$(");
     emit_call_command(out, name, args);
     out.push_str(")\"");
 }
 
 fn emit_call_command(out: &mut String, name: &str, args: &[Expr]) {
+    if emit_numeric_call_command(out, name, args) {
+        return;
+    }
     emit_call_head(out, name);
     for arg in args {
         out.push(' ');
         emit_call_arg(out, arg);
     }
+}
+
+fn emit_numeric_call(out: &mut String, name: &str, args: &[Expr]) -> bool {
+    if !is_numeric_builtin(name) {
+        return false;
+    }
+    out.push_str("\"$(");
+    emit_numeric_call_command(out, name, args);
+    out.push_str(")\"");
+    true
+}
+
+fn emit_numeric_call_command(out: &mut String, name: &str, args: &[Expr]) -> bool {
+    if !is_numeric_builtin(name) {
+        return false;
+    }
+    match name {
+        "Int.parse" | "parseInt" => emit_numeric_parse_command(out, &args[0], false, true),
+        "Int.tryParse" | "tryParseInt" => emit_numeric_parse_command(out, &args[0], false, false),
+        "Float.parse" | "parseFloat" => emit_numeric_parse_command(out, &args[0], true, true),
+        "Float.tryParse" | "tryParseFloat" => {
+            emit_numeric_parse_command(out, &args[0], true, false)
+        }
+        "numeric_abs" => {
+            out.push_str("awk -v v=");
+            emit_call_arg(out, &args[0]);
+            out.push_str(" 'BEGIN { if (v < 0) v = -v; print v }'");
+        }
+        "numeric_floor" => emit_numeric_unary_awk(out, &args[0], "int(v)"),
+        "numeric_ceil" => {
+            emit_numeric_unary_awk(out, &args[0], "int(v) == v ? v : int(v) + (v > 0 ? 1 : 0)")
+        }
+        "numeric_round" => {
+            emit_numeric_unary_awk(out, &args[0], "v < 0 ? int(v - 0.5) : int(v + 0.5)")
+        }
+        "numeric_min" => emit_numeric_binary_awk(out, &args[0], &args[1], "a < b ? a : b"),
+        "numeric_max" => emit_numeric_binary_awk(out, &args[0], &args[1], "a > b ? a : b"),
+        "numeric_clamp" => {
+            out.push_str("awk -v v=");
+            emit_call_arg(out, &args[0]);
+            out.push_str(" -v lo=");
+            emit_call_arg(out, &args[1]);
+            out.push_str(" -v hi=");
+            emit_call_arg(out, &args[2]);
+            out.push_str(" 'BEGIN { print (v < lo ? lo : (v > hi ? hi : v)) }'");
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn is_numeric_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "Int.parse"
+            | "Int.tryParse"
+            | "Float.parse"
+            | "Float.tryParse"
+            | "parseInt"
+            | "tryParseInt"
+            | "parseFloat"
+            | "tryParseFloat"
+            | "numeric_abs"
+            | "numeric_floor"
+            | "numeric_ceil"
+            | "numeric_round"
+            | "numeric_min"
+            | "numeric_max"
+            | "numeric_clamp"
+    )
+}
+
+fn emit_numeric_parse_command(out: &mut String, value: &Expr, float: bool, checked: bool) {
+    out.push_str("awk -v v=");
+    emit_call_arg(out, value);
+    let pattern = if checked && float {
+        r#"'BEGIN { if (v ~ /^[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)$/) { print v } else { exit 2 } }'"#
+    } else if checked {
+        r#"'BEGIN { if (v ~ /^[-+]?[0-9]+$/) { print int(v) } else { exit 2 } }'"#
+    } else if float {
+        r#"'BEGIN { if (v ~ /^[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)$/) { printf "1%s\n", v } else { exit 2 } }'"#
+    } else {
+        r#"'BEGIN { if (v ~ /^[-+]?[0-9]+$/) { printf "1%s\n", int(v) } else { exit 2 } }'"#
+    };
+    out.push(' ');
+    out.push_str(pattern);
+    if checked {
+        out.push_str(" || exit $?");
+    } else {
+        out.push_str(" && exit 0 || { status=$?; if [ \"$status\" -eq 2 ]; then printf 0; else exit \"$status\"; fi; }");
+    }
+}
+
+fn emit_numeric_unary_awk(out: &mut String, value: &Expr, body: &str) {
+    out.push_str("awk -v v=");
+    emit_call_arg(out, value);
+    out.push_str(" 'BEGIN { print ");
+    out.push('(');
+    out.push_str(body);
+    out.push(')');
+    out.push_str(" }'");
+}
+
+fn emit_numeric_binary_awk(out: &mut String, left: &Expr, right: &Expr, body: &str) {
+    out.push_str("awk -v a=");
+    emit_call_arg(out, left);
+    out.push_str(" -v b=");
+    emit_call_arg(out, right);
+    out.push_str(" 'BEGIN { print ");
+    out.push('(');
+    out.push_str(body);
+    out.push(')');
+    out.push_str(" }'");
 }
 
 fn emit_call_head(out: &mut String, name: &str) {

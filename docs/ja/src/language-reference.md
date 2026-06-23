@@ -100,6 +100,24 @@ const literal = r"バックスラッシュ \n をそのまま保持"
 `.contains(...)`、`.trim()`、`.replace(...)`、`.basename()`、
 `.dirname()`、`.stem()`、`.extname()` などの操作があります。
 
+## 数値
+
+`Int` と `Float` には checked parse と一般的な helper があります。
+
+```nacre
+const count = parseInt("42")
+const maybeCount = tryParseInt(input)
+const value = parseFloat("3.7")
+const rounded = value.round()
+const bounded = count.clamp(0, 10)
+const magnitude = (0 - 5).abs()
+```
+
+`parseInt` と `parseFloat` は無効な入力で終了します。`tryParseInt` と
+`tryParseFloat` は `Option[Int]` と `Option[Float]` を返します。数値には
+`.abs()`、`.min(...)`、`.max(...)`、`.clamp(...)`、Float 互換の `.floor()`、
+`.ceil()`、`.round()` も使えます。
+
 ## 関数
 
 ```nacre

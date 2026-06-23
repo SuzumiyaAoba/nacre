@@ -847,6 +847,30 @@ const reduced = scores.reduce(1, (acc, score) => acc * score)
 }
 
 #[test]
+fn generated_bash_runs_numeric_parsing_and_helpers() {
+    let output = run_source(
+        r#"
+const count = parseInt("42")
+const maybeCount = tryParseInt("17") ?? 0
+const missing = tryParseInt("nope") ?? 9
+const value = parseFloat("3.7")
+const maybeFloat = tryParseFloat("2.5") ?? 0.0
+const magnitude = (0 - 5).abs()
+const low = count.min(10)
+const high = count.max(100)
+const bounded = count.clamp(0, 10)
+const floored = value.floor()
+const ceiled = value.ceil()
+const rounded = value.round()
+"#,
+        "printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$count\" \"$maybeCount\" \"$missing\" \"$value\" \"$maybeFloat\" \"$magnitude\" \"$low\" \"$high\" \"$bounded\" \"$floored\" \"$ceiled\" \"$rounded\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "42|17|9|3.7|2.5|5|10|100|10|3|4|4\n");
+}
+
+#[test]
 fn generated_bash_runs_option_result_failure_paths_and_applicatives() {
     let output = run_source(
         r#"

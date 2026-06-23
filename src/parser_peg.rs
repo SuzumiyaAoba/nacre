@@ -1411,6 +1411,22 @@ fn method_expr(receiver: Expr, method: String, mut args: Vec<Expr>) -> Result<Ex
                 },
             )
         }
+        ("abs" | "floor" | "ceil" | "round", 0) => Expr::Call {
+            name: format!("numeric_{method}"),
+            args: vec![receiver],
+        },
+        ("min" | "max", 1) => Expr::Call {
+            name: format!("numeric_{method}"),
+            args: vec![receiver, args.remove(0)],
+        },
+        ("clamp", 2) => {
+            let min = args.remove(0);
+            let max = args.remove(0);
+            Expr::Call {
+                name: "numeric_clamp".into(),
+                args: vec![receiver, min, max],
+            }
+        }
         ("len" | "isEmpty" | "trim" | "trimStart" | "trimEnd" | "toUpper" | "toLower", _) => {
             let message = match method.as_str() {
                 "len" => "len expects no arguments",
@@ -1499,7 +1515,7 @@ fn apply_postfix(mut value: Expr, suffixes: Vec<Postfix>) -> Result<Expr, &'stat
     for suffix in suffixes {
         value = match suffix {
             Postfix::Call(args) => {
-                let Expr::Ident(name) = value else {
+                let Some(name) = qualified_name(&value) else {
                     return Err("only named functions can be called");
                 };
                 call_expr(name, args)

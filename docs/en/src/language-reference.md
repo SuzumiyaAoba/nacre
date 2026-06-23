@@ -99,6 +99,24 @@ record-field, tuple-field, operator, and method-call expressions. String and Pat
 `.slice(...)`, `.contains(...)`, `.trim()`, `.replace(...)`, `.basename()`,
 `.dirname()`, `.stem()`, and `.extname()`.
 
+## Numbers
+
+`Int` and `Float` support checked parsing and common helpers:
+
+```nacre
+const count = parseInt("42")
+const maybeCount = tryParseInt(input)
+const value = parseFloat("3.7")
+const rounded = value.round()
+const bounded = count.clamp(0, 10)
+const magnitude = (0 - 5).abs()
+```
+
+`parseInt` and `parseFloat` exit on invalid input. `tryParseInt` and
+`tryParseFloat` return `Option[Int]` and `Option[Float]`. Numeric values also
+support `.abs()`, `.min(...)`, `.max(...)`, `.clamp(...)`, and Float-compatible
+`.floor()`, `.ceil()`, and `.round()`.
+
 ## Functions
 
 ```nacre

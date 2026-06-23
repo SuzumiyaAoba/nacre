@@ -8841,6 +8841,9 @@ impl TypeChecker {
     }
 
     fn check_call(&self, name: &str, args: &[Expr], line: usize) -> Result<Type, CompileError> {
+        if let Some(ty) = self.check_numeric_builtin_call(name, args, line)? {
+            return Ok(ty);
+        }
         if let Some((trait_name, method)) = self.scoped_trait_method_parts(name) {
             let lowered_name = self.resolve_scoped_method_name(trait_name, method, args, line)?;
             return self.check_call(&lowered_name, args, line);
@@ -8930,6 +8933,113 @@ impl TypeChecker {
             }
         }
         Ok(sig.return_type.clone())
+    }
+
+    fn check_numeric_builtin_call(
+        &self,
+        name: &str,
+        args: &[Expr],
+        line: usize,
+    ) -> Result<Option<Type>, CompileError> {
+        let expected = match name {
+            "Int.parse" | "Int.tryParse" | "Float.parse" | "Float.tryParse" | "parseInt"
+            | "tryParseInt" | "parseFloat" | "tryParseFloat" | "numeric_abs" | "numeric_floor"
+            | "numeric_ceil" | "numeric_round" => 1,
+            "numeric_min" | "numeric_max" => 2,
+            "numeric_clamp" => 3,
+            _ => return Ok(None),
+        };
+        if args.len() != expected {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "function `{name}` expects {expected} arguments, found {}",
+                    args.len()
+                ),
+            ));
+        }
+        match name {
+            "Int.parse" | "parseInt" => {
+                self.check_string_arg(name, &args[0], line)?;
+                Ok(Some(Type::Int))
+            }
+            "Int.tryParse" | "tryParseInt" => {
+                self.check_string_arg(name, &args[0], line)?;
+                Ok(Some(Type::Applied("Option".to_string(), vec![Type::Int])))
+            }
+            "Float.parse" | "parseFloat" => {
+                self.check_string_arg(name, &args[0], line)?;
+                Ok(Some(Type::Float))
+            }
+            "Float.tryParse" | "tryParseFloat" => {
+                self.check_string_arg(name, &args[0], line)?;
+                Ok(Some(Type::Applied("Option".to_string(), vec![Type::Float])))
+            }
+            "numeric_abs" => {
+                let ty = self.check_numeric_arg(name, &args[0], line)?;
+                Ok(Some(if ty == Type::Float {
+                    Type::Float
+                } else {
+                    Type::Int
+                }))
+            }
+            "numeric_floor" | "numeric_ceil" | "numeric_round" => {
+                self.check_numeric_arg(name, &args[0], line)?;
+                Ok(Some(Type::Int))
+            }
+            "numeric_min" | "numeric_max" => {
+                let left = self.check_numeric_arg(name, &args[0], line)?;
+                let right = self.check_numeric_arg(name, &args[1], line)?;
+                Ok(Some(if left == Type::Float || right == Type::Float {
+                    Type::Float
+                } else {
+                    Type::Int
+                }))
+            }
+            "numeric_clamp" => {
+                let value = self.check_numeric_arg(name, &args[0], line)?;
+                let min = self.check_numeric_arg(name, &args[1], line)?;
+                let max = self.check_numeric_arg(name, &args[2], line)?;
+                Ok(Some(
+                    if value == Type::Float || min == Type::Float || max == Type::Float {
+                        Type::Float
+                    } else {
+                        Type::Int
+                    },
+                ))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn check_string_arg(&self, name: &str, arg: &Expr, line: usize) -> Result<(), CompileError> {
+        let ty = self.check_expr(arg, line)?;
+        if self.is_string_like(&ty) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!(
+                    "function `{name}` expects String argument, found {}",
+                    ty.name()
+                ),
+            ))
+        }
+    }
+
+    fn check_numeric_arg(&self, name: &str, arg: &Expr, line: usize) -> Result<Type, CompileError> {
+        let ty = self.check_expr(arg, line)?;
+        if self.is_numeric(&ty) {
+            Ok(if ty == Type::ExitCode { Type::Int } else { ty })
+        } else {
+            Err(CompileError::new(
+                line,
+                format!(
+                    "function `{name}` expects numeric argument, found {}",
+                    ty.name()
+                ),
+            ))
+        }
     }
 
     fn check_generic_call(
