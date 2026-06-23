@@ -1,6 +1,6 @@
 use crate::{
-    BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplConst, ImplMethod,
-    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    AssignTarget, BinaryOp, BindingPattern, CompileError, DoStep, Expr, ForBinding, ImplConst,
+    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 #[derive(Debug)]
@@ -832,7 +832,7 @@ fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
 
 fn compound_assignment(name: String, op: BinaryOp, right: Expr) -> Statement {
     Statement::Assign {
-        name: name.clone(),
+        target: AssignTarget::Name(name.clone()),
         expr: binary(Expr::Ident(name), op, right),
     }
 }
@@ -2087,8 +2087,21 @@ peg::parser! {
             = !language_keyword() name:identifier() hws() op:compound_assignment_op()
               hws() value:expression()
                 { super::compound_assignment(name, op, value) }
-            / !language_keyword() name:identifier() hws() "=" !"=" hws() value:expression()
-            { Statement::Assign { name, expr: value } }
+            / target:assignment_target() hws() "=" !"=" hws() value:expression()
+                { Statement::Assign { target, expr: value } }
+
+        rule assignment_target() -> AssignTarget
+            = !language_keyword() name:identifier() ws() "." ws() field:identifier()
+              ws() "[" ws() index:expression() ws() "]"
+                { AssignTarget::FieldIndex { name, field, index } }
+            / !language_keyword() name:identifier() ws() "[" ws() index:expression() ws() "]"
+                { AssignTarget::Index { name, index } }
+            / !language_keyword() name:identifier() ws() "." ws() "_" field:$(['1'..='9']['0'..='9']*)
+                {? field.parse().map(|field| AssignTarget::TupleField { name, field }).or(Err("tuple field")) }
+            / !language_keyword() name:identifier() ws() "." ws() field:identifier()
+                { AssignTarget::Field { name, field } }
+            / !language_keyword() name:identifier()
+                { AssignTarget::Name(name) }
 
         rule compound_assignment_op() -> BinaryOp
             = "++=" { BinaryOp::Concat }

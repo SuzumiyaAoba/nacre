@@ -352,6 +352,25 @@ Implemented operators include:
 Mutable bindings also support compound assignment with `+=`, `-=`, `*=`,
 `/=`, `%=`, `++=`, `&=`, `|=`, `^=`, `<<=`, and `>>=`.
 
+Mutable arrays, maps, and records can be updated through checked aggregate
+assignment:
+
+```nacre
+let users = ["Ada", "Grace"]
+users[0] = "Lin"
+
+let settings: Map[String, String] = {}
+settings["theme"] = "dark"
+
+let profile = { name: "Ada", tags: ["compiler"] }
+profile.name = "Grace"
+profile.tags[0] = "runtime"
+```
+
+Aggregate updates require the base binding to be `let`, and the assigned value
+must match the element or field type. Tuple fields are read-only; rebuild and
+assign the tuple instead.
+
 Parentheses control grouping.
 
 ## Rejected Syntax

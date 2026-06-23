@@ -178,6 +178,18 @@ fn public_api_reports_representative_type_errors() {
             "const value = 1\nconst x = match value { [first] => first, _ => 0 }",
             "array pattern requires Array",
         ),
+        (
+            "const users = [\"Ada\"]\nusers[0] = \"Grace\"",
+            "cannot assign to const `users`",
+        ),
+        (
+            "let users = [\"Ada\"]\nusers[0] = 1",
+            "assignment type mismatch",
+        ),
+        (
+            "let pair = (\"host\", 8080)\npair._1 = \"other\"",
+            "tuple fields are immutable",
+        ),
         ("const x = 1\nx += 1", "cannot assign to const `x`"),
         ("let x = \"a\"\nx += 1", "operator `+` requires numeric operands"),
     ];
@@ -761,6 +773,28 @@ _ => "no"
     );
 
     assert_eq!(stdout(output), "a:c|y|ok\n");
+}
+
+#[test]
+fn generated_bash_runs_mutable_aggregate_updates() {
+    let output = run_source(
+        r#"
+let users = ["Ada", "Grace"]
+users[0] = "Lin"
+
+let ports: Map[String, Int] = { "http": 80 }
+ports["https"] = 443
+
+let profile = { name: "Ada", tags: ["compiler", "math"] }
+profile.name = "Grace"
+profile.tags = ["runtime", "docs"]
+profile.tags[1] = "tests"
+"#,
+        "printf '%s|%s|%s|%s|%s\\n' \"${users[0]}\" \"${ports[https]}\" \"$profile_name\" \"${profile_tags[0]}\" \"${profile_tags[1]}\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "Lin|443|Grace|runtime|tests\n");
 }
 
 #[test]

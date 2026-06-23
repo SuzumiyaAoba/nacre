@@ -16,7 +16,9 @@ use value_layout::*;
 
 use crate::lowering::lower_method_calls;
 use crate::policy::ExecutionPolicy;
-use crate::{BindingPattern, ClosureCapture, Expr, ForBinding, Param, Program, Statement, Type};
+use crate::{
+    AssignTarget, BindingPattern, ClosureCapture, Expr, ForBinding, Param, Program, Statement, Type,
+};
 
 #[derive(Clone, Copy)]
 struct AllowedCommandParts<'a> {
@@ -137,8 +139,8 @@ fn emit_statement(out: &mut String, statement: &Statement, scope: EmitScope, def
             !mutable && !scope.is_loop(),
             scope.is_function(),
         ),
-        Statement::Assign { name, expr } => {
-            emit_assignment(out, name, expr);
+        Statement::Assign { target, expr } => {
+            emit_assignment_target(out, target, expr);
         }
         Statement::Expr(expr) => emit_expr_statement(out, expr),
         Statement::TryCommand(command) => {
@@ -1562,6 +1564,40 @@ fn emit_binding(out: &mut String, name: &str, expr: &Expr, readonly: bool, local
             emit_bound_expr(out, expr);
         }
     }
+}
+
+fn emit_assignment_target(out: &mut String, target: &AssignTarget, expr: &Expr) {
+    match target {
+        AssignTarget::Name(name) => emit_assignment(out, name, expr),
+        AssignTarget::Index { name, index } => emit_index_assignment(out, name, index, expr),
+        AssignTarget::FieldIndex { name, field, index } => {
+            emit_index_assignment(out, &format!("{name}_{field}"), index, expr)
+        }
+        AssignTarget::Field { name, field } => emit_field_assignment(out, name, field, expr),
+        AssignTarget::TupleField { .. } => unreachable!("tuple field assignment is rejected"),
+    }
+}
+
+fn emit_index_assignment(out: &mut String, name: &str, index: &Expr, expr: &Expr) {
+    out.push_str("if [[ \"$(declare -p ");
+    out.push_str(name);
+    out.push_str(" 2>/dev/null)\" == declare\\ -A* ]]; then ");
+    out.push_str(name);
+    out.push('[');
+    emit_call_arg(out, index);
+    out.push_str("]=");
+    emit_expr(out, expr);
+    out.push_str("; else ");
+    out.push_str(name);
+    out.push('[');
+    emit_index_expr(out, index);
+    out.push_str("]=");
+    emit_array_element(out, expr);
+    out.push_str("; fi\n");
+}
+
+fn emit_field_assignment(out: &mut String, name: &str, field: &str, expr: &Expr) {
+    emit_assignment(out, &format!("{name}_{field}"), expr);
 }
 
 fn emit_assignment(out: &mut String, name: &str, expr: &Expr) {

@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplConst, ImplMethod, MatchArm,
-    Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    AssignTarget, BindingPattern, ClosureCapture, DoStep, Expr, ForBinding, ImplConst, ImplMethod,
+    MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
 };
 
 struct NamespaceContext<'a> {
@@ -190,8 +190,8 @@ fn namespace_statement(
             pattern: namespace_pattern(pattern, namespace, binding_names, top_level),
             expr: namespace_expr(expr, context, local_names, local_type_names),
         },
-        Statement::Assign { name, expr } => Statement::Assign {
-            name: qualify_ref_name(name, namespace, binding_names, local_names),
+        Statement::Assign { target, expr } => Statement::Assign {
+            target: namespace_assign_target(target, context, local_names, local_type_names),
             expr: namespace_expr(expr, context, local_names, local_type_names),
         },
         Statement::Expr(expr) => {
@@ -630,6 +630,44 @@ fn namespace_pattern(
                 })
                 .collect(),
         ),
+    }
+}
+
+fn namespace_assign_target(
+    target: &AssignTarget,
+    context: &NamespaceContext<'_>,
+    local_names: &HashSet<String>,
+    local_type_names: &HashSet<String>,
+) -> AssignTarget {
+    let NamespaceContext {
+        namespace,
+        binding_names,
+        ..
+    } = context;
+    match target {
+        AssignTarget::Name(name) => AssignTarget::Name(qualify_ref_name(
+            name,
+            namespace,
+            binding_names,
+            local_names,
+        )),
+        AssignTarget::Index { name, index } => AssignTarget::Index {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            index: namespace_expr(index, context, local_names, local_type_names),
+        },
+        AssignTarget::FieldIndex { name, field, index } => AssignTarget::FieldIndex {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            field: field.clone(),
+            index: namespace_expr(index, context, local_names, local_type_names),
+        },
+        AssignTarget::Field { name, field } => AssignTarget::Field {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            field: field.clone(),
+        },
+        AssignTarget::TupleField { name, field } => AssignTarget::TupleField {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            field: *field,
+        },
     }
 }
 

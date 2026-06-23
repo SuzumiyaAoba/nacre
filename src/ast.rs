@@ -64,7 +64,7 @@ pub enum Statement {
         expr: Expr,
     },
     Assign {
-        name: String,
+        target: AssignTarget,
         expr: Expr,
     },
     Expr(Expr),
@@ -115,6 +115,28 @@ pub enum Statement {
     Continue,
     Return(Expr),
     Raw(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssignTarget {
+    Name(String),
+    Index {
+        name: String,
+        index: Expr,
+    },
+    FieldIndex {
+        name: String,
+        field: String,
+        index: Expr,
+    },
+    Field {
+        name: String,
+        field: String,
+    },
+    TupleField {
+        name: String,
+        field: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

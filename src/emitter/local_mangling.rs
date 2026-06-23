@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    BindingPattern, ClosureCapture, Expr, ForBinding, MatchArm, Param, Program, Statement,
+    AssignTarget, BindingPattern, ClosureCapture, Expr, ForBinding, MatchArm, Param, Program,
+    Statement,
 };
 
 #[derive(Debug)]
@@ -204,8 +205,8 @@ pub(super) fn mangle_local_statement(
                 expr,
             }
         }
-        Statement::Assign { name, expr } => Statement::Assign {
-            name: mangle_local_name(name, local_names),
+        Statement::Assign { target, expr } => Statement::Assign {
+            target: mangle_local_assign_target(target, local_names),
             expr: mangle_local_expr(expr, local_names),
         },
         Statement::Expr(expr) => Statement::Expr(mangle_local_expr(expr, local_names)),
@@ -336,6 +337,32 @@ fn mangle_local_pattern(
                 })
                 .collect(),
         ),
+    }
+}
+
+fn mangle_local_assign_target(
+    target: &AssignTarget,
+    local_names: &HashMap<String, String>,
+) -> AssignTarget {
+    match target {
+        AssignTarget::Name(name) => AssignTarget::Name(mangle_local_name(name, local_names)),
+        AssignTarget::Index { name, index } => AssignTarget::Index {
+            name: mangle_local_name(name, local_names),
+            index: mangle_local_expr(index, local_names),
+        },
+        AssignTarget::FieldIndex { name, field, index } => AssignTarget::FieldIndex {
+            name: mangle_local_name(name, local_names),
+            field: field.clone(),
+            index: mangle_local_expr(index, local_names),
+        },
+        AssignTarget::Field { name, field } => AssignTarget::Field {
+            name: mangle_local_name(name, local_names),
+            field: field.clone(),
+        },
+        AssignTarget::TupleField { name, field } => AssignTarget::TupleField {
+            name: mangle_local_name(name, local_names),
+            field: *field,
+        },
     }
 }
 

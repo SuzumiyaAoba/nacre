@@ -182,8 +182,8 @@ fn lower_statement(statement: &Statement, functions: &HashSet<String>) -> Statem
             pattern: pattern.clone(),
             expr: lower_expr(expr, functions),
         },
-        Statement::Assign { name, expr } => Statement::Assign {
-            name: name.clone(),
+        Statement::Assign { target, expr } => Statement::Assign {
+            target: target.clone(),
             expr: lower_expr(expr, functions),
         },
         Statement::Expr(expr) => Statement::Expr(lower_expr(expr, functions)),

@@ -350,6 +350,24 @@ const stderr: String = inspected.stderr
 可変バインディングでは、`+=`、`-=`、`*=`、`/=`、`%=`、`++=`、
 `&=`、`|=`、`^=`、`<<=`、`>>=` の複合代入も使用できます。
 
+可変の配列、Map、レコードは型検査付きの aggregate assignment で更新できます。
+
+```nacre
+let users = ["Ada", "Grace"]
+users[0] = "Lin"
+
+let settings: Map[String, String] = {}
+settings["theme"] = "dark"
+
+let profile = { name: "Ada", tags: ["compiler"] }
+profile.name = "Grace"
+profile.tags[0] = "runtime"
+```
+
+aggregate update ではベースのバインディングが `let` である必要があり、代入値は
+要素型またはフィールド型に一致する必要があります。タプル field は読み取り専用です。
+必要な場合はタプル全体を作り直して代入します。
+
 丸括弧で評価順序を指定できます。
 
 ## 拒否される構文

@@ -12,8 +12,9 @@ use std::rc::Rc;
 
 use crate::policy::ExecutionPolicy;
 use crate::{
-    BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ForBinding, ImplConst,
-    ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam, VariantDecl,
+    AssignTarget, BinaryOp, BindingPattern, ClosureCapture, CompileError, DoStep, Expr, ForBinding,
+    ImplConst, ImplMethod, MatchArm, Param, Program, Statement, TraitMethod, Type, TypeParam,
+    VariantDecl,
 };
 
 pub fn type_check(program: &Program) -> Result<(), CompileError> {
@@ -1435,16 +1436,11 @@ impl TypeChecker {
                     expr: self.lower_expr(expr, line)?,
                 })
             }
-            Statement::Assign { name, expr } => {
-                self.check_assignment(name, expr, line)?;
-                let expected = self.bindings.get(name).map(|binding| binding.ty.clone());
+            Statement::Assign { target, expr } => {
+                let expected = self.check_assignment(target, expr, line)?;
                 Ok(Statement::Assign {
-                    name: name.clone(),
-                    expr: if let Some(expected) = expected {
-                        self.lower_expr_expected(expr, &expected, line)?
-                    } else {
-                        self.lower_expr(expr, line)?
-                    },
+                    target: self.lower_assign_target(target, line)?,
+                    expr: self.lower_expr_expected(expr, &expected, line)?,
                 })
             }
             Statement::Expr(expr) => {
@@ -1695,7 +1691,9 @@ impl TypeChecker {
                 self.define_destructure(pattern, &ty, *mutable, line)?;
                 self.ensure_destructurable_source(expr, line)
             }
-            Statement::Assign { name, expr } => self.check_assignment(name, expr, line),
+            Statement::Assign { target, expr } => {
+                self.check_assignment(target, expr, line).map(|_| ())
+            }
             Statement::Expr(expr) => match expr {
                 Expr::ArrayPush { name, value } => {
                     self.check_array_push(name, value, line).map(|_| ())
@@ -2928,38 +2926,178 @@ impl TypeChecker {
 
     fn check_assignment(
         &mut self,
-        name: &str,
+        target: &AssignTarget,
         expr: &Expr,
         line: usize,
-    ) -> Result<(), CompileError> {
-        if name == "_" {
-            self.check_expr(expr, line)?;
-            return Ok(());
+    ) -> Result<Type, CompileError> {
+        if matches!(target, AssignTarget::Name(name) if name == "_") {
+            return self.check_expr(expr, line);
         }
+        let expected = self.assignment_target_type(target, line)?;
+        let expr_ty = self.check_expr_expected(expr, &expected, line)?;
+        if !self.is_assignable(&expected, &expr_ty, expr) {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "assignment type mismatch: expected {}, found {}",
+                    expected.name(),
+                    expr_ty.name()
+                ),
+            ));
+        }
+        Ok(expected)
+    }
+
+    fn lower_assign_target(
+        &self,
+        target: &AssignTarget,
+        line: usize,
+    ) -> Result<AssignTarget, CompileError> {
+        match target {
+            AssignTarget::Name(name) => Ok(AssignTarget::Name(name.clone())),
+            AssignTarget::Index { name, index } => Ok(AssignTarget::Index {
+                name: name.clone(),
+                index: self.lower_expr(index, line)?,
+            }),
+            AssignTarget::FieldIndex { name, field, index } => Ok(AssignTarget::FieldIndex {
+                name: name.clone(),
+                field: field.clone(),
+                index: self.lower_expr(index, line)?,
+            }),
+            AssignTarget::Field { name, field } => Ok(AssignTarget::Field {
+                name: name.clone(),
+                field: field.clone(),
+            }),
+            AssignTarget::TupleField { name, field } => Ok(AssignTarget::TupleField {
+                name: name.clone(),
+                field: *field,
+            }),
+        }
+    }
+
+    fn assignment_target_type(
+        &self,
+        target: &AssignTarget,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        match target {
+            AssignTarget::Name(name) => {
+                if name == "_" {
+                    return Ok(Type::Unit);
+                }
+                let binding = self.assignment_base_binding(name, line)?;
+                Ok(binding.ty.clone())
+            }
+            AssignTarget::Index { name, index } => {
+                let binding = self.assignment_base_binding(name, line)?;
+                let index_ty = self.check_expr(index, line)?;
+                self.index_assignment_target_type(name, &binding.ty, index, &index_ty, line)
+            }
+            AssignTarget::FieldIndex { name, field, index } => {
+                let binding = self.assignment_base_binding(name, line)?;
+                let Type::Record(fields) = &binding.ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!(
+                            "cannot assign field `{field}` on `{name}` of type {}",
+                            binding.ty.name()
+                        ),
+                    ));
+                };
+                let Some((_, field_ty)) = fields.iter().find(|(candidate, _)| candidate == field)
+                else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("record `{name}` has no field `{field}`"),
+                    ));
+                };
+                let index_ty = self.check_expr(index, line)?;
+                self.index_assignment_target_type(
+                    &format!("{name}.{field}"),
+                    field_ty,
+                    index,
+                    &index_ty,
+                    line,
+                )
+            }
+            AssignTarget::Field { name, field } => {
+                let binding = self.assignment_base_binding(name, line)?;
+                let Type::Record(fields) = &binding.ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!(
+                            "cannot assign field `{field}` on `{name}` of type {}",
+                            binding.ty.name()
+                        ),
+                    ));
+                };
+                fields
+                    .iter()
+                    .find(|(candidate, _)| candidate == field)
+                    .map(|(_, ty)| ty.clone())
+                    .ok_or_else(|| {
+                        CompileError::new(line, format!("record `{name}` has no field `{field}`"))
+                    })
+            }
+            AssignTarget::TupleField { name, .. } => {
+                self.assignment_base_binding(name, line)?;
+                Err(CompileError::new(
+                    line,
+                    "tuple fields are immutable; assign a rebuilt tuple instead".to_string(),
+                ))
+            }
+        }
+    }
+
+    fn index_assignment_target_type(
+        &self,
+        name: &str,
+        target_ty: &Type,
+        index: &Expr,
+        index_ty: &Type,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        match target_ty {
+            Type::Array(element) => {
+                if index_ty != &Type::Int {
+                    return Err(CompileError::new(
+                        line,
+                        format!("array index must be Int, found {}", index_ty.name()),
+                    ));
+                }
+                Ok((**element).clone())
+            }
+            Type::Map(key, value) => {
+                if self.is_assignable(key, index_ty, index) {
+                    Ok((**value).clone())
+                } else {
+                    Err(CompileError::new(
+                        line,
+                        format!("map key must be {}, found {}", key.name(), index_ty.name()),
+                    ))
+                }
+            }
+            other => Err(CompileError::new(
+                line,
+                format!("cannot index-assign into `{name}` of type {}", other.name()),
+            )),
+        }
+    }
+
+    fn assignment_base_binding(&self, name: &str, line: usize) -> Result<Binding, CompileError> {
         let Some(binding) = self.lookup_binding(name) else {
             return Err(CompileError::new(
                 line,
                 format!("cannot assign to undefined variable `{name}`"),
             ));
         };
-        let expr_ty = self.check_expr_expected(expr, &binding.ty, line)?;
         if !binding.mutable {
             return Err(CompileError::new(
                 line,
                 format!("cannot assign to const `{name}`"),
             ));
         }
-        if !self.is_assignable(&binding.ty, &expr_ty, expr) {
-            return Err(CompileError::new(
-                line,
-                format!(
-                    "type mismatch for `{name}`: expected {}, found {}",
-                    binding.ty.name(),
-                    expr_ty.name()
-                ),
-            ));
-        }
-        Ok(())
+        Ok(binding)
     }
 
     fn check_annotation(
