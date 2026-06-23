@@ -12,7 +12,14 @@ fn run_source_with_policy(
     trailer: &str,
     args: &[&str],
 ) -> Output {
-    let mut bash = nacre::compile_source_with_policy(source, policy).unwrap();
+    let source = source.to_string();
+    let policy = policy.clone();
+    let mut bash = std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || nacre::compile_source_with_policy(&source, &policy).unwrap())
+        .unwrap()
+        .join()
+        .unwrap();
     bash.push('\n');
     bash.push_str(trailer);
     Command::new("bash")
@@ -814,6 +821,29 @@ const result = (await right) ++ ":" ++ (await left)
     );
 
     assert_eq!(stdout(output), "label:right:label:left\n");
+}
+
+#[test]
+fn generated_bash_runs_collection_sequence_operations() {
+    let output = run_source(
+        r#"
+const scores = [1, 2, 3, 4]
+const evens = scores.filter(score => score % 2 == 0)
+const expanded = scores.flatMap(score => [score, score + 10])
+const found = scores.find(score => score > 2) ?? 0
+const hasLarge = scores.any(score => score > 3)
+const allPositive = scores.all(score => score > 0)
+const total = scores.fold(0, (acc, score) => acc + score)
+const reduced = scores.reduce(1, (acc, score) => acc * score)
+"#,
+        "printf '%s|%s|%s|%s|%s|%s|%s\\n' \"${evens[*]}\" \"${expanded[*]}\" \"$found\" \"$hasLarge\" \"$allPositive\" \"$total\" \"$reduced\"",
+        &[],
+    );
+
+    assert_eq!(
+        stdout(output),
+        "2 4|1 11 2 12 3 13 4 14|3|true|true|10|24\n"
+    );
 }
 
 #[test]

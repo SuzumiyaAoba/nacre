@@ -406,6 +406,56 @@ pub enum Expr {
         value: Box<Expr>,
         mapper: Box<Expr>,
     },
+    ArrayFilter {
+        name: String,
+        predicate: Box<Expr>,
+    },
+    ArrayFilterValue {
+        value: Box<Expr>,
+        predicate: Box<Expr>,
+    },
+    ArrayFlatMap {
+        name: String,
+        mapper: Box<Expr>,
+    },
+    ArrayFlatMapValue {
+        value: Box<Expr>,
+        mapper: Box<Expr>,
+    },
+    ArrayFind {
+        name: String,
+        predicate: Box<Expr>,
+    },
+    ArrayFindValue {
+        value: Box<Expr>,
+        predicate: Box<Expr>,
+    },
+    ArrayAny {
+        name: String,
+        predicate: Box<Expr>,
+    },
+    ArrayAnyValue {
+        value: Box<Expr>,
+        predicate: Box<Expr>,
+    },
+    ArrayAll {
+        name: String,
+        predicate: Box<Expr>,
+    },
+    ArrayAllValue {
+        value: Box<Expr>,
+        predicate: Box<Expr>,
+    },
+    ArrayFold {
+        name: String,
+        initial: Box<Expr>,
+        reducer: Box<Expr>,
+    },
+    ArrayFoldValue {
+        value: Box<Expr>,
+        initial: Box<Expr>,
+        reducer: Box<Expr>,
+    },
     OptionMap {
         name: String,
         mapper: Box<Expr>,

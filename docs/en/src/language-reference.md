@@ -136,6 +136,27 @@ Function calls may use named arguments after any positional arguments. Named
 arguments can appear in any order, and omitted parameters use their defaults
 when available.
 
+## Collections and Sequences
+
+Arrays support typed sequence helpers. Mappers and predicates may be named
+functions or lambdas.
+
+```nacre
+const scores = [1, 2, 3, 4]
+const evens = scores.filter(score => score % 2 == 0)
+const expanded = scores.flatMap(score => [score, score + 10])
+const found = scores.find(score => score > 2)
+const hasLarge = scores.any(score => score > 3)
+const allPositive = scores.all(score => score > 0)
+const total = scores.fold(0, (acc, score) => acc + score)
+const csv = evens.join(",")
+```
+
+`map` and `flatMap` return arrays, `filter` keeps matching elements,
+`find` returns `Option[T]`, `any` and `all` return `Bool`, and
+`fold`/`reduce` keep the accumulator type. Empty array literals need a type
+annotation before these helpers can infer element types.
+
 ## Options and Results
 
 Options use `T?` or `Option[T]`. Results use `Result[T, E]` or `T \/ E`.

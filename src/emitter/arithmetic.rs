@@ -190,6 +190,18 @@ pub(super) fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(Strin
         | Expr::ArrayUniqueValue(_)
         | Expr::ArrayMap { .. }
         | Expr::ArrayMapValue { .. }
+        | Expr::ArrayFilter { .. }
+        | Expr::ArrayFilterValue { .. }
+        | Expr::ArrayFlatMap { .. }
+        | Expr::ArrayFlatMapValue { .. }
+        | Expr::ArrayFind { .. }
+        | Expr::ArrayFindValue { .. }
+        | Expr::ArrayAny { .. }
+        | Expr::ArrayAnyValue { .. }
+        | Expr::ArrayAll { .. }
+        | Expr::ArrayAllValue { .. }
+        | Expr::ArrayFold { .. }
+        | Expr::ArrayFoldValue { .. }
         | Expr::OptionMap { .. }
         | Expr::OptionMapValue { .. }
         | Expr::OptionFlatMap { .. }

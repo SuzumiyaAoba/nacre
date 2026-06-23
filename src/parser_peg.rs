@@ -1079,13 +1079,86 @@ fn method_expr(receiver: Expr, method: String, mut args: Vec<Expr>) -> Result<Ex
             let mapper = Box::new(args.remove(0));
             named_or_value(
                 receiver,
-                |name| Expr::OptionFlatMap {
+                |name| Expr::ArrayFlatMap {
                     name,
                     mapper: mapper.clone(),
                 },
-                |value| Expr::OptionFlatMapValue {
+                |value| Expr::ArrayFlatMapValue {
                     value: Box::new(value),
                     mapper: mapper.clone(),
+                },
+            )
+        }
+        ("filter", 1) => {
+            let predicate = Box::new(args.remove(0));
+            named_or_value(
+                receiver,
+                |name| Expr::ArrayFilter {
+                    name,
+                    predicate: predicate.clone(),
+                },
+                |value| Expr::ArrayFilterValue {
+                    value: Box::new(value),
+                    predicate: predicate.clone(),
+                },
+            )
+        }
+        ("find", 1) => {
+            let predicate = Box::new(args.remove(0));
+            named_or_value(
+                receiver,
+                |name| Expr::ArrayFind {
+                    name,
+                    predicate: predicate.clone(),
+                },
+                |value| Expr::ArrayFindValue {
+                    value: Box::new(value),
+                    predicate: predicate.clone(),
+                },
+            )
+        }
+        ("any", 1) => {
+            let predicate = Box::new(args.remove(0));
+            named_or_value(
+                receiver,
+                |name| Expr::ArrayAny {
+                    name,
+                    predicate: predicate.clone(),
+                },
+                |value| Expr::ArrayAnyValue {
+                    value: Box::new(value),
+                    predicate: predicate.clone(),
+                },
+            )
+        }
+        ("all", 1) => {
+            let predicate = Box::new(args.remove(0));
+            named_or_value(
+                receiver,
+                |name| Expr::ArrayAll {
+                    name,
+                    predicate: predicate.clone(),
+                },
+                |value| Expr::ArrayAllValue {
+                    value: Box::new(value),
+                    predicate: predicate.clone(),
+                },
+            )
+        }
+        ("fold", 2) | ("reduce", 2) => {
+            let initial = Box::new(args.remove(0));
+            let reducer = Box::new(args.remove(0));
+            named_or_value(
+                receiver,
+                |name| Expr::ArrayFold {
+                    name,
+                    initial: initial.clone(),
+                    reducer: reducer.clone(),
+                },
+                |value| Expr::ArrayFoldValue {
+                    value: Box::new(value),
+                    initial: initial.clone(),
+                    reducer: reducer.clone(),
                 },
             )
         }

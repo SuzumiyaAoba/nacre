@@ -136,6 +136,27 @@ const decoratedValue = ("Na" ++ "cre").decorate()
 関数呼び出しでは、位置引数の後に名前付き引数を指定できます。名前付き引数の順序は
 自由で、省略したパラメータにデフォルト値があればそれが使われます。
 
+## コレクションとシーケンス
+
+配列には型付きのシーケンス helper があります。mapper と predicate には名前付き関数
+またはラムダを渡せます。
+
+```nacre
+const scores = [1, 2, 3, 4]
+const evens = scores.filter(score => score % 2 == 0)
+const expanded = scores.flatMap(score => [score, score + 10])
+const found = scores.find(score => score > 2)
+const hasLarge = scores.any(score => score > 3)
+const allPositive = scores.all(score => score > 0)
+const total = scores.fold(0, (acc, score) => acc + score)
+const csv = evens.join(",")
+```
+
+`map` と `flatMap` は配列を返し、`filter` は条件に合う要素を残します。
+`find` は `Option[T]`、`any` と `all` は `Bool`、`fold`/`reduce` は accumulator
+の型を保ちます。空の配列リテラルでは、これらの helper が要素型を推論できるように
+型注釈が必要です。
+
 ## Option と Result
 
 Option は `T?` または `Option[T]`、Result は `Result[T, E]` または

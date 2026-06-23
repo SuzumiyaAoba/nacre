@@ -1475,6 +1475,164 @@ fn namespace_expr(
                 local_type_names,
             )),
         },
+        Expr::ArrayFilter { name, predicate } => Expr::ArrayFilter {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFilterValue { value, predicate } => Expr::ArrayFilterValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFlatMap { name, mapper } => Expr::ArrayFlatMap {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            mapper: Box::new(namespace_expr(
+                mapper,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFlatMapValue { value, mapper } => Expr::ArrayFlatMapValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            mapper: Box::new(namespace_expr(
+                mapper,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFind { name, predicate } => Expr::ArrayFind {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFindValue { value, predicate } => Expr::ArrayFindValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayAny { name, predicate } => Expr::ArrayAny {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayAnyValue { value, predicate } => Expr::ArrayAnyValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayAll { name, predicate } => Expr::ArrayAll {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayAllValue { value, predicate } => Expr::ArrayAllValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            predicate: Box::new(namespace_expr(
+                predicate,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => Expr::ArrayFold {
+            name: qualify_ref_name(name, namespace, binding_names, local_names),
+            initial: Box::new(namespace_expr(
+                initial,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            reducer: Box::new(namespace_expr(
+                reducer,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => Expr::ArrayFoldValue {
+            value: Box::new(namespace_expr(
+                value,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            initial: Box::new(namespace_expr(
+                initial,
+                context,
+                local_names,
+                local_type_names,
+            )),
+            reducer: Box::new(namespace_expr(
+                reducer,
+                context,
+                local_names,
+                local_type_names,
+            )),
+        },
         Expr::OptionMap { name, mapper } => Expr::OptionMap {
             name: qualify_ref_name(name, namespace, binding_names, local_names),
             mapper: Box::new(namespace_expr(

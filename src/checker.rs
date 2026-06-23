@@ -478,6 +478,19 @@ fn collect_expr_function_refs(
         }
         Expr::Index { index, .. }
         | Expr::ArrayMap { mapper: index, .. }
+        | Expr::ArrayFilter {
+            predicate: index, ..
+        }
+        | Expr::ArrayFlatMap { mapper: index, .. }
+        | Expr::ArrayFind {
+            predicate: index, ..
+        }
+        | Expr::ArrayAny {
+            predicate: index, ..
+        }
+        | Expr::ArrayAll {
+            predicate: index, ..
+        }
         | Expr::OptionMap { mapper: index, .. }
         | Expr::OptionFlatMap { mapper: index, .. }
         | Expr::ResultMap { mapper: index, .. }
@@ -512,6 +525,23 @@ fn collect_expr_function_refs(
             collect_expr_function_refs(end, functions, refs);
         }
         Expr::ArrayMapValue { value, mapper }
+        | Expr::ArrayFilterValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayFlatMapValue { value, mapper }
+        | Expr::ArrayFindValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayAnyValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayAllValue {
+            value,
+            predicate: mapper,
+        }
         | Expr::OptionMapValue { value, mapper }
         | Expr::OptionFlatMapValue { value, mapper }
         | Expr::ResultMapValue { value, mapper }
@@ -522,6 +552,21 @@ fn collect_expr_function_refs(
         Expr::OptionApValue { function, value } | Expr::ResultApValue { function, value } => {
             collect_expr_function_refs(function, functions, refs);
             collect_expr_function_refs(value, functions, refs);
+        }
+        Expr::ArrayFold {
+            initial, reducer, ..
+        } => {
+            collect_expr_function_refs(initial, functions, refs);
+            collect_expr_function_refs(reducer, functions, refs);
+        }
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => {
+            collect_expr_function_refs(value, functions, refs);
+            collect_expr_function_refs(initial, functions, refs);
+            collect_expr_function_refs(reducer, functions, refs);
         }
         Expr::ArrayTakeValue { value, count }
         | Expr::ArrayDropValue { value, count }
@@ -932,6 +977,19 @@ impl TypeChecker {
             }
             Expr::Index { index, .. }
             | Expr::ArrayMap { mapper: index, .. }
+            | Expr::ArrayFilter {
+                predicate: index, ..
+            }
+            | Expr::ArrayFlatMap { mapper: index, .. }
+            | Expr::ArrayFind {
+                predicate: index, ..
+            }
+            | Expr::ArrayAny {
+                predicate: index, ..
+            }
+            | Expr::ArrayAll {
+                predicate: index, ..
+            }
             | Expr::OptionMap { mapper: index, .. }
             | Expr::OptionFlatMap { mapper: index, .. }
             | Expr::ResultMap { mapper: index, .. }
@@ -1011,6 +1069,23 @@ impl TypeChecker {
                 self.extract_nested_try_results(value, false, prefix);
             }
             Expr::ArrayMapValue { value, mapper }
+            | Expr::ArrayFilterValue {
+                value,
+                predicate: mapper,
+            }
+            | Expr::ArrayFlatMapValue { value, mapper }
+            | Expr::ArrayFindValue {
+                value,
+                predicate: mapper,
+            }
+            | Expr::ArrayAnyValue {
+                value,
+                predicate: mapper,
+            }
+            | Expr::ArrayAllValue {
+                value,
+                predicate: mapper,
+            }
             | Expr::OptionMapValue { value, mapper }
             | Expr::OptionFlatMapValue { value, mapper }
             | Expr::ResultMapValue { value, mapper }
@@ -1029,6 +1104,21 @@ impl TypeChecker {
             } => {
                 self.extract_nested_try_results(value, false, prefix);
                 self.extract_nested_try_results(mapper, false, prefix);
+            }
+            Expr::ArrayFold {
+                initial, reducer, ..
+            } => {
+                self.extract_nested_try_results(initial, false, prefix);
+                self.extract_nested_try_results(reducer, false, prefix);
+            }
+            Expr::ArrayFoldValue {
+                value,
+                initial,
+                reducer,
+            } => {
+                self.extract_nested_try_results(value, false, prefix);
+                self.extract_nested_try_results(initial, false, prefix);
+                self.extract_nested_try_results(reducer, false, prefix);
             }
             Expr::MapSet { key, value, .. }
             | Expr::FsWriteLines {
@@ -3827,6 +3917,242 @@ impl TypeChecker {
                     )?),
                 })
             }
+            Expr::ArrayFilter { name, predicate } => {
+                let element = self.check_array_predicate(name, predicate, "filter", line)?;
+                Ok(Expr::ArrayFilter {
+                    name: name.clone(),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFilterValue { value, predicate } => {
+                let element = self.check_array_predicate_value(value, predicate, "filter", line)?;
+                Ok(Expr::ArrayFilterValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFlatMap { name, mapper } => {
+                if self.is_qualified_function_call(name, "flatMap") {
+                    return Ok(Expr::Call {
+                        name: format!("{name}.flatMap"),
+                        args: vec![self.lower_expr(mapper, line)?],
+                    });
+                }
+                if self
+                    .lookup_binding(name)
+                    .is_some_and(|binding| result_types(&binding.ty).is_some())
+                {
+                    let (element, _, result) = self.check_result_flat_map(name, mapper, line)?;
+                    return Ok(Expr::ResultFlatMap {
+                        name: name.clone(),
+                        mapper: Box::new(self.lower_map_mapper(
+                            mapper, &element, &result, line,
+                        )?),
+                    });
+                }
+                if self
+                    .lookup_binding(name)
+                    .is_some_and(|binding| option_element_type(&binding.ty).is_some())
+                {
+                    let (element, mapped) = self.check_option_flat_map(name, mapper, line)?;
+                    return Ok(Expr::OptionFlatMap {
+                        name: name.clone(),
+                        mapper: Box::new(self.lower_map_mapper(
+                            mapper, &element, &mapped, line,
+                        )?),
+                    });
+                }
+                let Some(binding) = self.lookup_binding(name) else {
+                    return Err(CompileError::new(line, format!("undefined variable `{name}`")));
+                };
+                let Type::Array(element) = binding.ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type {} has no flatMap method", binding.ty.name()),
+                    ));
+                };
+                let mapped = self.check_array_flat_map_mapper(mapper, &element, line)?;
+                Ok(Expr::ArrayFlatMap {
+                    name: name.clone(),
+                    mapper: Box::new(self.lower_map_mapper(
+                        mapper,
+                        &element,
+                        &Type::Array(Box::new(mapped)),
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFlatMapValue { value, mapper } => {
+                let value_ty = self.check_expr(value, line)?;
+                if result_types(&value_ty).is_some() {
+                    let (element, _, result) =
+                        self.check_result_flat_map_value(value, mapper, line)?;
+                    return Ok(Expr::ResultFlatMapValue {
+                        value: Box::new(self.lower_expr(value, line)?),
+                        mapper: Box::new(self.lower_map_mapper(
+                            mapper, &element, &result, line,
+                        )?),
+                    });
+                }
+                if option_element_type(&value_ty).is_some() {
+                    let (element, mapped) =
+                        self.check_option_flat_map_value(value, mapper, line)?;
+                    return Ok(Expr::OptionFlatMapValue {
+                        value: Box::new(self.lower_expr(value, line)?),
+                        mapper: Box::new(self.lower_map_mapper(
+                            mapper, &element, &mapped, line,
+                        )?),
+                    });
+                }
+                let Type::Array(element) = value_ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type {} has no flatMap method", value_ty.name()),
+                    ));
+                };
+                let mapped = self.check_array_flat_map_mapper(mapper, &element, line)?;
+                Ok(Expr::ArrayFlatMapValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    mapper: Box::new(self.lower_map_mapper(
+                        mapper,
+                        &element,
+                        &Type::Array(Box::new(mapped)),
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFind { name, predicate } => {
+                let element = self.check_array_predicate(name, predicate, "find", line)?;
+                Ok(Expr::ArrayFind {
+                    name: name.clone(),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFindValue { value, predicate } => {
+                let element = self.check_array_predicate_value(value, predicate, "find", line)?;
+                Ok(Expr::ArrayFindValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayAny { name, predicate } => {
+                let element = self.check_array_predicate(name, predicate, "any", line)?;
+                Ok(Expr::ArrayAny {
+                    name: name.clone(),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayAnyValue { value, predicate } => {
+                let element = self.check_array_predicate_value(value, predicate, "any", line)?;
+                Ok(Expr::ArrayAnyValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayAll { name, predicate } => {
+                let element = self.check_array_predicate(name, predicate, "all", line)?;
+                Ok(Expr::ArrayAll {
+                    name: name.clone(),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayAllValue { value, predicate } => {
+                let element = self.check_array_predicate_value(value, predicate, "all", line)?;
+                Ok(Expr::ArrayAllValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    predicate: Box::new(self.lower_map_mapper(
+                        predicate,
+                        &element,
+                        &Type::Bool,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFold {
+                name,
+                initial,
+                reducer,
+            } => {
+                let Some(binding) = self.lookup_binding(name) else {
+                    return Err(CompileError::new(line, format!("undefined variable `{name}`")));
+                };
+                let Type::Array(element) = binding.ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type {} has no fold method", binding.ty.name()),
+                    ));
+                };
+                let accumulator = self.check_expr(initial, line)?;
+                Ok(Expr::ArrayFold {
+                    name: name.clone(),
+                    initial: Box::new(self.lower_expr(initial, line)?),
+                    reducer: Box::new(self.lower_fold_reducer(
+                        reducer,
+                        &accumulator,
+                        &element,
+                        line,
+                    )?),
+                })
+            }
+            Expr::ArrayFoldValue {
+                value,
+                initial,
+                reducer,
+            } => {
+                let value_ty = self.check_expr(value, line)?;
+                let Type::Array(element) = value_ty else {
+                    return Err(CompileError::new(
+                        line,
+                        format!("type {} has no fold method", value_ty.name()),
+                    ));
+                };
+                let accumulator = self.check_expr(initial, line)?;
+                Ok(Expr::ArrayFoldValue {
+                    value: Box::new(self.lower_expr(value, line)?),
+                    initial: Box::new(self.lower_expr(initial, line)?),
+                    reducer: Box::new(self.lower_fold_reducer(
+                        reducer,
+                        &accumulator,
+                        &element,
+                        line,
+                    )?),
+                })
+            }
             Expr::OptionMap { name, mapper } => {
                 let (element, mapped) = self.check_option_map(name, mapper, line)?;
                 Ok(Expr::OptionMap {
@@ -5054,6 +5380,77 @@ impl TypeChecker {
                         .map(|(_, mapped)| Type::Array(Box::new(mapped)))
                 }
             }
+            Expr::ArrayFilter { name, predicate } => self
+                .check_array_predicate(name, predicate, "filter", line)
+                .map(|element| Type::Array(Box::new(element))),
+            Expr::ArrayFilterValue { value, predicate } => self
+                .check_array_predicate_value(value, predicate, "filter", line)
+                .map(|element| Type::Array(Box::new(element))),
+            Expr::ArrayFlatMap { name, mapper } => {
+                if self.is_qualified_function_call(name, "flatMap") {
+                    self.check_call(
+                        &format!("{name}.flatMap"),
+                        std::slice::from_ref(mapper),
+                        line,
+                    )
+                } else if self
+                    .lookup_binding(name)
+                    .is_some_and(|binding| result_types(&binding.ty).is_some())
+                {
+                    self.check_result_flat_map(name, mapper, line)
+                        .map(|(_, _, result)| result)
+                } else if self
+                    .lookup_binding(name)
+                    .is_some_and(|binding| option_element_type(&binding.ty).is_some())
+                {
+                    self.check_option_flat_map(name, mapper, line)
+                        .map(|(_, mapped)| mapped)
+                } else {
+                    self.check_array_flat_map(name, mapper, line)
+                        .map(|mapped| Type::Array(Box::new(mapped)))
+                }
+            }
+            Expr::ArrayFlatMapValue { value, mapper } => {
+                let value_ty = self.check_expr(value, line)?;
+                if result_types(&value_ty).is_some() {
+                    self.check_result_flat_map_value(value, mapper, line)
+                        .map(|(_, _, result)| result)
+                } else if option_element_type(&value_ty).is_some() {
+                    self.check_option_flat_map_value(value, mapper, line)
+                        .map(|(_, mapped)| mapped)
+                } else {
+                    self.check_array_flat_map_value(value, mapper, line)
+                        .map(|mapped| Type::Array(Box::new(mapped)))
+                }
+            }
+            Expr::ArrayFind { name, predicate } => self
+                .check_array_predicate(name, predicate, "find", line)
+                .map(|element| Type::Applied("Option".to_string(), vec![element])),
+            Expr::ArrayFindValue { value, predicate } => self
+                .check_array_predicate_value(value, predicate, "find", line)
+                .map(|element| Type::Applied("Option".to_string(), vec![element])),
+            Expr::ArrayAny { name, predicate } => self
+                .check_array_predicate(name, predicate, "any", line)
+                .map(|_| Type::Bool),
+            Expr::ArrayAnyValue { value, predicate } => self
+                .check_array_predicate_value(value, predicate, "any", line)
+                .map(|_| Type::Bool),
+            Expr::ArrayAll { name, predicate } => self
+                .check_array_predicate(name, predicate, "all", line)
+                .map(|_| Type::Bool),
+            Expr::ArrayAllValue { value, predicate } => self
+                .check_array_predicate_value(value, predicate, "all", line)
+                .map(|_| Type::Bool),
+            Expr::ArrayFold {
+                name,
+                initial,
+                reducer,
+            } => self.check_array_fold(name, initial, reducer, line),
+            Expr::ArrayFoldValue {
+                value,
+                initial,
+                reducer,
+            } => self.check_array_fold_value(value, initial, reducer, line),
             Expr::OptionMap { name, mapper } => self
                 .check_option_map(name, mapper, line)
                 .map(|(_, mapped)| Type::Applied("Option".to_string(), vec![mapped])),
@@ -6316,6 +6713,145 @@ impl TypeChecker {
         Ok((*element, mapped))
     }
 
+    fn check_array_predicate(
+        &self,
+        name: &str,
+        predicate: &Expr,
+        method: &str,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Some(binding) = self.lookup_binding(name) else {
+            return Err(CompileError::new(
+                line,
+                format!("undefined variable `{name}`"),
+            ));
+        };
+        let Type::Array(element) = binding.ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no {method} method", binding.ty.name()),
+            ));
+        };
+        self.check_predicate_mapper(predicate, &element, method, line)?;
+        Ok(*element)
+    }
+
+    fn check_array_predicate_value(
+        &self,
+        value: &Expr,
+        predicate: &Expr,
+        method: &str,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let value_ty = self.check_expr(value, line)?;
+        let Type::Array(element) = value_ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no {method} method", value_ty.name()),
+            ));
+        };
+        if *element == Type::Unit {
+            return Err(CompileError::new(
+                line,
+                format!("{method} requires a non-empty array literal or typed array"),
+            ));
+        }
+        self.check_predicate_mapper(predicate, &element, method, line)?;
+        Ok(*element)
+    }
+
+    fn check_array_flat_map(
+        &self,
+        name: &str,
+        mapper: &Expr,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Some(binding) = self.lookup_binding(name) else {
+            return Err(CompileError::new(
+                line,
+                format!("undefined variable `{name}`"),
+            ));
+        };
+        let Type::Array(element) = binding.ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no flatMap method", binding.ty.name()),
+            ));
+        };
+        self.check_array_flat_map_mapper(mapper, &element, line)
+    }
+
+    fn check_array_flat_map_value(
+        &self,
+        value: &Expr,
+        mapper: &Expr,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let value_ty = self.check_expr(value, line)?;
+        let Type::Array(element) = value_ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no flatMap method", value_ty.name()),
+            ));
+        };
+        if *element == Type::Unit {
+            return Err(CompileError::new(
+                line,
+                "flatMap requires a non-empty array literal or typed array".to_string(),
+            ));
+        }
+        self.check_array_flat_map_mapper(mapper, &element, line)
+    }
+
+    fn check_array_fold(
+        &self,
+        name: &str,
+        initial: &Expr,
+        reducer: &Expr,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let Some(binding) = self.lookup_binding(name) else {
+            return Err(CompileError::new(
+                line,
+                format!("undefined variable `{name}`"),
+            ));
+        };
+        let Type::Array(element) = binding.ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no fold method", binding.ty.name()),
+            ));
+        };
+        let accumulator = self.check_expr(initial, line)?;
+        self.check_fold_reducer(reducer, &accumulator, &element, line)?;
+        Ok(accumulator)
+    }
+
+    fn check_array_fold_value(
+        &self,
+        value: &Expr,
+        initial: &Expr,
+        reducer: &Expr,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let value_ty = self.check_expr(value, line)?;
+        let Type::Array(element) = value_ty else {
+            return Err(CompileError::new(
+                line,
+                format!("type {} has no fold method", value_ty.name()),
+            ));
+        };
+        if *element == Type::Unit {
+            return Err(CompileError::new(
+                line,
+                "fold requires a non-empty array literal or typed array".to_string(),
+            ));
+        }
+        let accumulator = self.check_expr(initial, line)?;
+        self.check_fold_reducer(reducer, &accumulator, &element, line)?;
+        Ok(accumulator)
+    }
+
     fn check_option_map(
         &self,
         name: &str,
@@ -6938,6 +7474,116 @@ impl TypeChecker {
         Ok(*return_type)
     }
 
+    fn check_predicate_mapper(
+        &self,
+        predicate: &Expr,
+        element: &Type,
+        method: &str,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        let result = self.check_map_mapper(predicate, element, method, line)?;
+        if result == Type::Bool {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!(
+                    "{method} predicate must return Bool, found {}",
+                    result.name()
+                ),
+            ))
+        }
+    }
+
+    fn check_array_flat_map_mapper(
+        &self,
+        mapper: &Expr,
+        element: &Type,
+        line: usize,
+    ) -> Result<Type, CompileError> {
+        let result = self.check_map_mapper(mapper, element, "flatMap", line)?;
+        let Type::Array(mapped) = result else {
+            return Err(CompileError::new(
+                line,
+                format!(
+                    "flatMap mapper must return an array, found {}",
+                    result.name()
+                ),
+            ));
+        };
+        if *mapped == Type::Unit {
+            return Err(CompileError::new(
+                line,
+                "flatMap mapper must return a typed or non-empty array".to_string(),
+            ));
+        }
+        Ok(*mapped)
+    }
+
+    fn check_fold_reducer(
+        &self,
+        reducer: &Expr,
+        accumulator: &Type,
+        element: &Type,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        let result = if let Expr::Lambda { params, body } = reducer {
+            if params.len() != 2 {
+                return Err(CompileError::new(
+                    line,
+                    format!("fold reducer expects 2 parameters, found {}", params.len()),
+                ));
+            }
+            let (checker, _) =
+                self.lambda_checker(params, &[accumulator.clone(), element.clone()], line)?;
+            checker.check_expr(body, line)?
+        } else {
+            let reducer_ty = self.check_expr(reducer, line)?;
+            let Type::Function(params, return_type) = reducer_ty else {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "fold reducer must be a function, found {}",
+                        reducer_ty.name()
+                    ),
+                ));
+            };
+            if params.len() != 2 {
+                return Err(CompileError::new(
+                    line,
+                    format!("fold reducer expects 2 parameters, found {}", params.len()),
+                ));
+            }
+            if !self.is_assignable(&params[0], accumulator, reducer)
+                || !self.is_assignable(&params[1], element, reducer)
+            {
+                return Err(CompileError::new(
+                    line,
+                    format!(
+                        "fold reducer must accept ({}, {}), found ({}, {})",
+                        accumulator.name(),
+                        element.name(),
+                        params[0].name(),
+                        params[1].name()
+                    ),
+                ));
+            }
+            *return_type
+        };
+        if self.is_assignable(accumulator, &result, reducer) {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                line,
+                format!(
+                    "fold reducer must return {}, found {}",
+                    accumulator.name(),
+                    result.name()
+                ),
+            ))
+        }
+    }
+
     fn lower_map_mapper(
         &self,
         mapper: &Expr,
@@ -6953,6 +7599,26 @@ impl TypeChecker {
             );
         }
         self.lower_expr(mapper, line)
+    }
+
+    fn lower_fold_reducer(
+        &self,
+        reducer: &Expr,
+        accumulator: &Type,
+        element: &Type,
+        line: usize,
+    ) -> Result<Expr, CompileError> {
+        if matches!(reducer, Expr::Lambda { .. }) {
+            return self.lower_expr_expected(
+                reducer,
+                &Type::Function(
+                    vec![accumulator.clone(), element.clone()],
+                    Box::new(accumulator.clone()),
+                ),
+                line,
+            );
+        }
+        self.lower_expr(reducer, line)
     }
 
     fn check_array_count(
@@ -9897,13 +10563,39 @@ fn expr_uses_process_args(expr: &Expr) -> bool {
         | Expr::OptionFlatMap { name, mapper }
         | Expr::ResultMap { name, mapper }
         | Expr::ResultFlatMap { name, mapper }
-        | Expr::ArrayMap { name, mapper } => name == "args" || expr_uses_process_args(mapper),
+        | Expr::ArrayMap { name, mapper }
+        | Expr::ArrayFlatMap { name, mapper } => name == "args" || expr_uses_process_args(mapper),
+        Expr::ArrayFilter { name, predicate }
+        | Expr::ArrayFind { name, predicate }
+        | Expr::ArrayAny { name, predicate }
+        | Expr::ArrayAll { name, predicate } => name == "args" || expr_uses_process_args(predicate),
         Expr::OptionMapValue { value, mapper }
         | Expr::OptionFlatMapValue { value, mapper }
         | Expr::ResultMapValue { value, mapper }
         | Expr::ResultFlatMapValue { value, mapper }
-        | Expr::ArrayMapValue { value, mapper } => {
+        | Expr::ArrayMapValue { value, mapper }
+        | Expr::ArrayFlatMapValue { value, mapper } => {
             expr_uses_process_args(value) || expr_uses_process_args(mapper)
+        }
+        Expr::ArrayFilterValue { value, predicate }
+        | Expr::ArrayFindValue { value, predicate }
+        | Expr::ArrayAnyValue { value, predicate }
+        | Expr::ArrayAllValue { value, predicate } => {
+            expr_uses_process_args(value) || expr_uses_process_args(predicate)
+        }
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => name == "args" || expr_uses_process_args(initial) || expr_uses_process_args(reducer),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => {
+            expr_uses_process_args(value)
+                || expr_uses_process_args(initial)
+                || expr_uses_process_args(reducer)
         }
         Expr::OptionAp { name, value }
         | Expr::ResultAp { name, value }

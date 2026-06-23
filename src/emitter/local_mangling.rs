@@ -720,6 +720,64 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
             value: Box::new(mangle_local_expr(value, local_names)),
             mapper: Box::new(mangle_local_expr(mapper, local_names)),
         },
+        Expr::ArrayFilter { name, predicate } => Expr::ArrayFilter {
+            name: mangle_local_name(name, local_names),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayFilterValue { value, predicate } => Expr::ArrayFilterValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayFlatMap { name, mapper } => Expr::ArrayFlatMap {
+            name: mangle_local_name(name, local_names),
+            mapper: Box::new(mangle_local_expr(mapper, local_names)),
+        },
+        Expr::ArrayFlatMapValue { value, mapper } => Expr::ArrayFlatMapValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            mapper: Box::new(mangle_local_expr(mapper, local_names)),
+        },
+        Expr::ArrayFind { name, predicate } => Expr::ArrayFind {
+            name: mangle_local_name(name, local_names),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayFindValue { value, predicate } => Expr::ArrayFindValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayAny { name, predicate } => Expr::ArrayAny {
+            name: mangle_local_name(name, local_names),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayAnyValue { value, predicate } => Expr::ArrayAnyValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayAll { name, predicate } => Expr::ArrayAll {
+            name: mangle_local_name(name, local_names),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayAllValue { value, predicate } => Expr::ArrayAllValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            predicate: Box::new(mangle_local_expr(predicate, local_names)),
+        },
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => Expr::ArrayFold {
+            name: mangle_local_name(name, local_names),
+            initial: Box::new(mangle_local_expr(initial, local_names)),
+            reducer: Box::new(mangle_local_expr(reducer, local_names)),
+        },
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => Expr::ArrayFoldValue {
+            value: Box::new(mangle_local_expr(value, local_names)),
+            initial: Box::new(mangle_local_expr(initial, local_names)),
+            reducer: Box::new(mangle_local_expr(reducer, local_names)),
+        },
         Expr::OptionMap { name, mapper } => Expr::OptionMap {
             name: mangle_local_name(name, local_names),
             mapper: Box::new(mangle_local_expr(mapper, local_names)),

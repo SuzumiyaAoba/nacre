@@ -371,6 +371,28 @@ fn emit_return(out: &mut String, expr: &Expr) {
         emit_return_try_result(out, value);
         return;
     }
+    if matches!(
+        expr,
+        Expr::Array(_)
+            | Expr::ArrayMap { .. }
+            | Expr::ArrayMapValue { .. }
+            | Expr::ArrayFilter { .. }
+            | Expr::ArrayFilterValue { .. }
+            | Expr::ArrayFlatMap { .. }
+            | Expr::ArrayFlatMapValue { .. }
+            | Expr::ArrayReverse(_)
+            | Expr::ArrayReverseValue(_)
+            | Expr::ArraySort(_)
+            | Expr::ArraySortValue(_)
+            | Expr::ArrayUnique(_)
+            | Expr::ArrayUniqueValue(_)
+    ) {
+        out.push_str("local -a __nacre_return_value\n__nacre_return_value=");
+        emit_expr(out, expr);
+        out.push_str("\nif [ \"${#__nacre_return_value[@]}\" -gt 0 ]; then printf '%s\\n' \"${__nacre_return_value[@]}\"; fi\n");
+        out.push_str("return 0\n");
+        return;
+    }
     out.push_str("local __nacre_return_value\n__nacre_return_value=");
     emit_expr(out, expr);
     out.push_str("\nprintf '%s\\n' \"$__nacre_return_value\"\n");
@@ -1348,6 +1370,51 @@ fn emit_binding(out: &mut String, name: &str, expr: &Expr, readonly: bool, local
         Expr::ArrayMapValue { value, mapper } => {
             emit_array_map_value_binding(out, name, value, mapper, readonly, local)
         }
+        Expr::ArrayFilter {
+            name: source,
+            predicate,
+        } => emit_array_filter_binding(out, name, source, predicate, readonly, local),
+        Expr::ArrayFilterValue { value, predicate } => {
+            emit_array_filter_value_binding(out, name, value, predicate, readonly, local)
+        }
+        Expr::ArrayFlatMap {
+            name: source,
+            mapper,
+        } => emit_array_flat_map_binding(out, name, source, mapper, readonly, local),
+        Expr::ArrayFlatMapValue { value, mapper } => {
+            emit_array_flat_map_value_binding(out, name, value, mapper, readonly, local)
+        }
+        Expr::ArrayFind {
+            name: source,
+            predicate,
+        } => emit_array_find_binding(out, name, source, predicate, readonly, local),
+        Expr::ArrayFindValue { value, predicate } => {
+            emit_array_find_value_binding(out, name, value, predicate, readonly, local)
+        }
+        Expr::ArrayAny {
+            name: source,
+            predicate,
+        } => emit_array_bool_binding(out, name, source, predicate, true, readonly, local),
+        Expr::ArrayAnyValue { value, predicate } => {
+            emit_array_bool_value_binding(out, name, value, predicate, true, readonly, local)
+        }
+        Expr::ArrayAll {
+            name: source,
+            predicate,
+        } => emit_array_bool_binding(out, name, source, predicate, false, readonly, local),
+        Expr::ArrayAllValue { value, predicate } => {
+            emit_array_bool_value_binding(out, name, value, predicate, false, readonly, local)
+        }
+        Expr::ArrayFold {
+            name: source,
+            initial,
+            reducer,
+        } => emit_array_fold_binding(out, name, source, initial, reducer, readonly, local),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => emit_array_fold_value_binding(out, name, value, initial, reducer, readonly, local),
         Expr::MapKeys(source) => {
             emit_array_expansion_binding(out, name, &format!("${{!{source}[@]}}"), readonly, local)
         }
@@ -2113,6 +2180,12 @@ fn destructure_source_name(expr: &Expr) -> String {
         | Expr::ArraySort(name)
         | Expr::ArrayUnique(name)
         | Expr::ArrayMap { name, .. }
+        | Expr::ArrayFilter { name, .. }
+        | Expr::ArrayFlatMap { name, .. }
+        | Expr::ArrayFind { name, .. }
+        | Expr::ArrayAny { name, .. }
+        | Expr::ArrayAll { name, .. }
+        | Expr::ArrayFold { name, .. }
         | Expr::ArrayTake { name, .. }
         | Expr::ArrayDrop { name, .. }
         | Expr::Join { name, .. }
@@ -2366,6 +2439,18 @@ fn emit_discard_expr(out: &mut String, expr: &Expr) {
         | Expr::ArrayUniqueValue(_)
         | Expr::ArrayMap { .. }
         | Expr::ArrayMapValue { .. }
+        | Expr::ArrayFilter { .. }
+        | Expr::ArrayFilterValue { .. }
+        | Expr::ArrayFlatMap { .. }
+        | Expr::ArrayFlatMapValue { .. }
+        | Expr::ArrayFind { .. }
+        | Expr::ArrayFindValue { .. }
+        | Expr::ArrayAny { .. }
+        | Expr::ArrayAnyValue { .. }
+        | Expr::ArrayAll { .. }
+        | Expr::ArrayAllValue { .. }
+        | Expr::ArrayFold { .. }
+        | Expr::ArrayFoldValue { .. }
         | Expr::OptionMap { .. }
         | Expr::OptionMapValue { .. }
         | Expr::OptionFlatMap { .. }
@@ -2760,6 +2845,21 @@ fn collect_awaits(expr: &Expr, futures: &mut Vec<String>) {
         | Expr::ArrayMap {
             mapper: pattern, ..
         }
+        | Expr::ArrayFilter {
+            predicate: pattern, ..
+        }
+        | Expr::ArrayFlatMap {
+            mapper: pattern, ..
+        }
+        | Expr::ArrayFind {
+            predicate: pattern, ..
+        }
+        | Expr::ArrayAny {
+            predicate: pattern, ..
+        }
+        | Expr::ArrayAll {
+            predicate: pattern, ..
+        }
         | Expr::OptionMap {
             mapper: pattern, ..
         }
@@ -2773,12 +2873,44 @@ fn collect_awaits(expr: &Expr, futures: &mut Vec<String>) {
             mapper: pattern, ..
         } => collect_awaits(pattern, futures),
         Expr::ArrayMapValue { value, mapper }
+        | Expr::ArrayFilterValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayFlatMapValue { value, mapper }
+        | Expr::ArrayFindValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayAnyValue {
+            value,
+            predicate: mapper,
+        }
+        | Expr::ArrayAllValue {
+            value,
+            predicate: mapper,
+        }
         | Expr::OptionMapValue { value, mapper }
         | Expr::OptionFlatMapValue { value, mapper }
         | Expr::ResultMapValue { value, mapper }
         | Expr::ResultFlatMapValue { value, mapper } => {
             collect_awaits(value, futures);
             collect_awaits(mapper, futures);
+        }
+        Expr::ArrayFold {
+            initial, reducer, ..
+        } => {
+            collect_awaits(initial, futures);
+            collect_awaits(reducer, futures);
+        }
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => {
+            collect_awaits(value, futures);
+            collect_awaits(initial, futures);
+            collect_awaits(reducer, futures);
         }
         Expr::Match { value, arms } => {
             collect_awaits(value, futures);
@@ -3001,6 +3133,36 @@ fn emit_expr(out: &mut String, expr: &Expr) {
         Expr::ArrayUniqueValue(value) => emit_array_unique_value_expr(out, value),
         Expr::ArrayMap { name, mapper } => emit_array_map_value(out, name, mapper),
         Expr::ArrayMapValue { value, mapper } => emit_array_map_value_expr(out, value, mapper),
+        Expr::ArrayFilter { name, predicate } => emit_array_filter_value(out, name, predicate),
+        Expr::ArrayFilterValue { value, predicate } => {
+            emit_array_filter_value_expr(out, value, predicate)
+        }
+        Expr::ArrayFlatMap { name, mapper } => emit_array_flat_map_value(out, name, mapper),
+        Expr::ArrayFlatMapValue { value, mapper } => {
+            emit_array_flat_map_value_expr(out, value, mapper)
+        }
+        Expr::ArrayFind { name, predicate } => emit_array_find_value(out, name, predicate),
+        Expr::ArrayFindValue { value, predicate } => {
+            emit_array_find_value_expr(out, value, predicate)
+        }
+        Expr::ArrayAny { name, predicate } => emit_array_bool_value(out, name, predicate, true),
+        Expr::ArrayAnyValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, true)
+        }
+        Expr::ArrayAll { name, predicate } => emit_array_bool_value(out, name, predicate, false),
+        Expr::ArrayAllValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, false)
+        }
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => emit_array_fold_value(out, name, initial, reducer),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => emit_array_fold_value_expr(out, value, initial, reducer),
         Expr::OptionMap { name, mapper } => emit_option_map(out, name, mapper),
         Expr::OptionMapValue { value, mapper } => emit_option_map_value(out, value, mapper),
         Expr::OptionFlatMap { name, mapper } => emit_option_flat_map(out, name, mapper),
@@ -4408,6 +4570,267 @@ fn emit_array_map_to(out: &mut String, binding: &str, source: &str, mapper: &Exp
     out.push_str("done\n");
 }
 
+fn emit_array_filter_binding(
+    out: &mut String,
+    binding: &str,
+    source: &str,
+    predicate: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_loop_binding(out, binding, readonly, local, |out| {
+        emit_array_filter_to(out, binding, source, predicate)
+    });
+}
+
+fn emit_array_filter_value_binding(
+    out: &mut String,
+    binding: &str,
+    source: &Expr,
+    predicate: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_temp_assignment(out, "__nacre_array_value", source, local);
+    emit_array_filter_binding(
+        out,
+        binding,
+        "__nacre_array_value",
+        predicate,
+        readonly,
+        local,
+    );
+    out.push_str("unset __nacre_array_value\n");
+}
+
+fn emit_array_flat_map_binding(
+    out: &mut String,
+    binding: &str,
+    source: &str,
+    mapper: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_loop_binding(out, binding, readonly, local, |out| {
+        emit_array_flat_map_to(out, binding, source, mapper)
+    });
+}
+
+fn emit_array_flat_map_value_binding(
+    out: &mut String,
+    binding: &str,
+    source: &Expr,
+    mapper: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_temp_assignment(out, "__nacre_array_value", source, local);
+    emit_array_flat_map_binding(out, binding, "__nacre_array_value", mapper, readonly, local);
+    out.push_str("unset __nacre_array_value\n");
+}
+
+fn emit_array_loop_binding(
+    out: &mut String,
+    binding: &str,
+    readonly: bool,
+    local: bool,
+    emit_body: impl FnOnce(&mut String),
+) {
+    if local {
+        out.push_str("local -a ");
+        out.push_str(binding);
+        out.push('\n');
+    }
+    emit_body(out);
+    if readonly && !local {
+        out.push_str("readonly -a ");
+        out.push_str(binding);
+        out.push('\n');
+    }
+}
+
+fn emit_array_filter_to(out: &mut String, binding: &str, source: &str, predicate: &Expr) {
+    out.push_str(binding);
+    out.push_str("=()\n");
+    out.push_str("for __nacre_item in \"${");
+    out.push_str(source);
+    out.push_str("[@]}\"; do\n");
+    out.push_str("if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(" \"$__nacre_item\")\" == true ]]; then ");
+    out.push_str(binding);
+    out.push_str("+=(\"$__nacre_item\"); fi\n");
+    out.push_str("done\n");
+}
+
+fn emit_array_flat_map_to(out: &mut String, binding: &str, source: &str, mapper: &Expr) {
+    out.push_str(binding);
+    out.push_str("=()\n");
+    out.push_str("for __nacre_item in \"${");
+    out.push_str(source);
+    out.push_str("[@]}\"; do\n");
+    out.push_str("while IFS= read -r __nacre_mapped; do ");
+    out.push_str(binding);
+    out.push_str("+=(\"$__nacre_mapped\"); done < <(");
+    emit_mapper_command(out, mapper);
+    out.push_str(" \"$__nacre_item\")\n");
+    out.push_str("done\n");
+}
+
+fn emit_array_find_binding(
+    out: &mut String,
+    binding: &str,
+    source: &str,
+    predicate: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_scalar_binding_prefix(out, binding, readonly, local);
+    out.push_str("\"$(for __nacre_item in \"${");
+    out.push_str(source);
+    out.push_str("[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(" \"$__nacre_item\")\" == true ]]; then printf '1%s' \"$__nacre_item\"; break; fi; done)\"\n");
+}
+
+fn emit_array_find_value_binding(
+    out: &mut String,
+    binding: &str,
+    source: &Expr,
+    predicate: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_temp_assignment(out, "__nacre_array_value", source, local);
+    emit_array_find_binding(
+        out,
+        binding,
+        "__nacre_array_value",
+        predicate,
+        readonly,
+        local,
+    );
+    out.push_str("unset __nacre_array_value\n");
+}
+
+fn emit_array_bool_binding(
+    out: &mut String,
+    binding: &str,
+    source: &str,
+    predicate: &Expr,
+    any: bool,
+    readonly: bool,
+    local: bool,
+) {
+    emit_scalar_binding_prefix(out, binding, readonly, local);
+    out.push_str("\"$(for __nacre_item in \"${");
+    out.push_str(source);
+    out.push_str("[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(" \"$__nacre_item\")\" == true ]]; then ");
+    if any {
+        out.push_str("printf true; exit");
+    } else {
+        out.push(':');
+    }
+    out.push_str("; else ");
+    if any {
+        out.push(':');
+    } else {
+        out.push_str("printf false; exit");
+    }
+    out.push_str("; fi; done; printf ");
+    emit_shell_word(out, if any { "false" } else { "true" });
+    out.push_str(")\"\n");
+}
+
+fn emit_array_bool_value_binding(
+    out: &mut String,
+    binding: &str,
+    source: &Expr,
+    predicate: &Expr,
+    any: bool,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_temp_assignment(out, "__nacre_array_value", source, local);
+    emit_array_bool_binding(
+        out,
+        binding,
+        "__nacre_array_value",
+        predicate,
+        any,
+        readonly,
+        local,
+    );
+    out.push_str("unset __nacre_array_value\n");
+}
+
+fn emit_array_fold_binding(
+    out: &mut String,
+    binding: &str,
+    source: &str,
+    initial: &Expr,
+    reducer: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    if local {
+        out.push_str("local ");
+    }
+    out.push_str(binding);
+    out.push('=');
+    emit_call_arg(out, initial);
+    out.push('\n');
+    out.push_str("for __nacre_item in \"${");
+    out.push_str(source);
+    out.push_str("[@]}\"; do\n");
+    out.push_str(binding);
+    out.push_str("=\"$(");
+    emit_mapper_command(out, reducer);
+    out.push_str(" \"$");
+    out.push_str(binding);
+    out.push_str("\" \"$__nacre_item\")\"\n");
+    out.push_str("done\n");
+    if readonly && !local {
+        out.push_str("readonly ");
+        out.push_str(binding);
+        out.push('\n');
+    }
+}
+
+fn emit_array_fold_value_binding(
+    out: &mut String,
+    binding: &str,
+    source: &Expr,
+    initial: &Expr,
+    reducer: &Expr,
+    readonly: bool,
+    local: bool,
+) {
+    emit_array_temp_assignment(out, "__nacre_array_value", source, local);
+    emit_array_fold_binding(
+        out,
+        binding,
+        "__nacre_array_value",
+        initial,
+        reducer,
+        readonly,
+        local,
+    );
+    out.push_str("unset __nacre_array_value\n");
+}
+
+fn emit_scalar_binding_prefix(out: &mut String, binding: &str, readonly: bool, local: bool) {
+    if local {
+        out.push_str("local ");
+    } else if readonly {
+        out.push_str("readonly ");
+    }
+    out.push_str(binding);
+    out.push('=');
+}
+
 fn emit_mapper_command(out: &mut String, mapper: &Expr) {
     match mapper {
         Expr::Ident(name) => emit_call_head(out, name),
@@ -4775,6 +5198,106 @@ fn emit_array_map_value_expr(out: &mut String, value: &Expr, mapper: &Expr) {
     out.push_str("; for __nacre_item in \"${__nacre_array_value[@]}\"; do ");
     emit_mapper_command(out, mapper);
     out.push_str(" \"$__nacre_item\"; done)");
+}
+
+fn emit_array_filter_value(out: &mut String, name: &str, predicate: &Expr) {
+    out.push_str("$(for __nacre_item in \"${");
+    out.push_str(name);
+    out.push_str("[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(
+        " \"$__nacre_item\")\" == true ]]; then printf '%s\\n' \"$__nacre_item\"; fi; done)",
+    );
+}
+
+fn emit_array_filter_value_expr(out: &mut String, value: &Expr, predicate: &Expr) {
+    out.push_str("$(__nacre_array_value=");
+    emit_expr(out, value);
+    out.push_str("; for __nacre_item in \"${__nacre_array_value[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(
+        " \"$__nacre_item\")\" == true ]]; then printf '%s\\n' \"$__nacre_item\"; fi; done)",
+    );
+}
+
+fn emit_array_flat_map_value(out: &mut String, name: &str, mapper: &Expr) {
+    out.push_str("$(for __nacre_item in \"${");
+    out.push_str(name);
+    out.push_str("[@]}\"; do ");
+    emit_mapper_command(out, mapper);
+    out.push_str(" \"$__nacre_item\"; done)");
+}
+
+fn emit_array_flat_map_value_expr(out: &mut String, value: &Expr, mapper: &Expr) {
+    emit_array_map_value_expr(out, value, mapper);
+}
+
+fn emit_array_find_value(out: &mut String, name: &str, predicate: &Expr) {
+    out.push_str("$(for __nacre_item in \"${");
+    out.push_str(name);
+    out.push_str("[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(
+        " \"$__nacre_item\")\" == true ]]; then printf '1%s' \"$__nacre_item\"; break; fi; done)",
+    );
+}
+
+fn emit_array_find_value_expr(out: &mut String, value: &Expr, predicate: &Expr) {
+    out.push_str("$(__nacre_array_value=");
+    emit_expr(out, value);
+    out.push_str("; for __nacre_item in \"${__nacre_array_value[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(
+        " \"$__nacre_item\")\" == true ]]; then printf '1%s' \"$__nacre_item\"; break; fi; done)",
+    );
+}
+
+fn emit_array_bool_value(out: &mut String, name: &str, predicate: &Expr, any: bool) {
+    out.push_str("$(for __nacre_item in \"${");
+    out.push_str(name);
+    out.push_str("[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(" \"$__nacre_item\")\" == true ]]; then ");
+    out.push_str(if any { "printf true; exit" } else { ":" });
+    out.push_str("; else ");
+    out.push_str(if any { ":" } else { "printf false; exit" });
+    out.push_str("; fi; done; printf ");
+    emit_shell_word(out, if any { "false" } else { "true" });
+    out.push(')');
+}
+
+fn emit_array_bool_value_expr(out: &mut String, value: &Expr, predicate: &Expr, any: bool) {
+    out.push_str("$(__nacre_array_value=");
+    emit_expr(out, value);
+    out.push_str("; for __nacre_item in \"${__nacre_array_value[@]}\"; do if [[ \"$(");
+    emit_mapper_command(out, predicate);
+    out.push_str(" \"$__nacre_item\")\" == true ]]; then ");
+    out.push_str(if any { "printf true; exit" } else { ":" });
+    out.push_str("; else ");
+    out.push_str(if any { ":" } else { "printf false; exit" });
+    out.push_str("; fi; done; printf ");
+    emit_shell_word(out, if any { "false" } else { "true" });
+    out.push(')');
+}
+
+fn emit_array_fold_value(out: &mut String, name: &str, initial: &Expr, reducer: &Expr) {
+    out.push_str("$(__nacre_acc=");
+    emit_call_arg(out, initial);
+    out.push_str("; for __nacre_item in \"${");
+    out.push_str(name);
+    out.push_str("[@]}\"; do __nacre_acc=\"$(");
+    emit_mapper_command(out, reducer);
+    out.push_str(" \"$__nacre_acc\" \"$__nacre_item\")\"; done; printf '%s' \"$__nacre_acc\")");
+}
+
+fn emit_array_fold_value_expr(out: &mut String, value: &Expr, initial: &Expr, reducer: &Expr) {
+    out.push_str("$(__nacre_array_value=");
+    emit_expr(out, value);
+    out.push_str("; __nacre_acc=");
+    emit_call_arg(out, initial);
+    out.push_str("; for __nacre_item in \"${__nacre_array_value[@]}\"; do __nacre_acc=\"$(");
+    emit_mapper_command(out, reducer);
+    out.push_str(" \"$__nacre_acc\" \"$__nacre_item\")\"; done; printf '%s' \"$__nacre_acc\")");
 }
 
 fn emit_map_keys_value(out: &mut String, name: &str) {
@@ -6347,6 +6870,36 @@ fn emit_array_element(out: &mut String, expr: &Expr) {
         Expr::ArrayUniqueValue(value) => emit_array_unique_value_expr(out, value),
         Expr::ArrayMap { name, mapper } => emit_array_map_value(out, name, mapper),
         Expr::ArrayMapValue { value, mapper } => emit_array_map_value_expr(out, value, mapper),
+        Expr::ArrayFilter { name, predicate } => emit_array_filter_value(out, name, predicate),
+        Expr::ArrayFilterValue { value, predicate } => {
+            emit_array_filter_value_expr(out, value, predicate)
+        }
+        Expr::ArrayFlatMap { name, mapper } => emit_array_flat_map_value(out, name, mapper),
+        Expr::ArrayFlatMapValue { value, mapper } => {
+            emit_array_flat_map_value_expr(out, value, mapper)
+        }
+        Expr::ArrayFind { name, predicate } => emit_array_find_value(out, name, predicate),
+        Expr::ArrayFindValue { value, predicate } => {
+            emit_array_find_value_expr(out, value, predicate)
+        }
+        Expr::ArrayAny { name, predicate } => emit_array_bool_value(out, name, predicate, true),
+        Expr::ArrayAnyValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, true)
+        }
+        Expr::ArrayAll { name, predicate } => emit_array_bool_value(out, name, predicate, false),
+        Expr::ArrayAllValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, false)
+        }
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => emit_array_fold_value(out, name, initial, reducer),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => emit_array_fold_value_expr(out, value, initial, reducer),
         Expr::OptionMap { name, mapper } => emit_option_map(out, name, mapper),
         Expr::OptionMapValue { value, mapper } => emit_option_map_value(out, value, mapper),
         Expr::OptionFlatMap { name, mapper } => emit_option_flat_map(out, name, mapper),
@@ -6636,6 +7189,36 @@ fn emit_call_arg(out: &mut String, arg: &Expr) {
         Expr::ArrayUniqueValue(value) => emit_array_unique_value_expr(out, value),
         Expr::ArrayMap { name, mapper } => emit_array_map_value(out, name, mapper),
         Expr::ArrayMapValue { value, mapper } => emit_array_map_value_expr(out, value, mapper),
+        Expr::ArrayFilter { name, predicate } => emit_array_filter_value(out, name, predicate),
+        Expr::ArrayFilterValue { value, predicate } => {
+            emit_array_filter_value_expr(out, value, predicate)
+        }
+        Expr::ArrayFlatMap { name, mapper } => emit_array_flat_map_value(out, name, mapper),
+        Expr::ArrayFlatMapValue { value, mapper } => {
+            emit_array_flat_map_value_expr(out, value, mapper)
+        }
+        Expr::ArrayFind { name, predicate } => emit_array_find_value(out, name, predicate),
+        Expr::ArrayFindValue { value, predicate } => {
+            emit_array_find_value_expr(out, value, predicate)
+        }
+        Expr::ArrayAny { name, predicate } => emit_array_bool_value(out, name, predicate, true),
+        Expr::ArrayAnyValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, true)
+        }
+        Expr::ArrayAll { name, predicate } => emit_array_bool_value(out, name, predicate, false),
+        Expr::ArrayAllValue { value, predicate } => {
+            emit_array_bool_value_expr(out, value, predicate, false)
+        }
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => emit_array_fold_value(out, name, initial, reducer),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => emit_array_fold_value_expr(out, value, initial, reducer),
         Expr::OptionMap { name, mapper } => emit_option_map(out, name, mapper),
         Expr::OptionMapValue { value, mapper } => emit_option_map_value(out, value, mapper),
         Expr::OptionFlatMap { name, mapper } => emit_option_flat_map(out, name, mapper),

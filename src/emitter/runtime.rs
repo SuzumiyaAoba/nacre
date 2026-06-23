@@ -205,6 +205,48 @@ fn expr_needs_runtime(expr: &Expr) -> bool {
         Expr::Call { args, .. } | Expr::AllowedCommand { args, .. } => {
             args.iter().any(expr_needs_runtime)
         }
+        Expr::ArrayMap { mapper, .. }
+        | Expr::ArrayFilter {
+            predicate: mapper, ..
+        }
+        | Expr::ArrayFlatMap { mapper, .. }
+        | Expr::ArrayFind {
+            predicate: mapper, ..
+        }
+        | Expr::ArrayAny {
+            predicate: mapper, ..
+        }
+        | Expr::ArrayAll {
+            predicate: mapper, ..
+        }
+        | Expr::OptionMap { mapper, .. }
+        | Expr::OptionFlatMap { mapper, .. }
+        | Expr::ResultMap { mapper, .. }
+        | Expr::ResultFlatMap { mapper, .. } => expr_needs_runtime(mapper),
+        Expr::ArrayMapValue { value, mapper }
+        | Expr::ArrayFlatMapValue { value, mapper }
+        | Expr::OptionMapValue { value, mapper }
+        | Expr::OptionFlatMapValue { value, mapper }
+        | Expr::ResultMapValue { value, mapper }
+        | Expr::ResultFlatMapValue { value, mapper } => {
+            expr_needs_runtime(value) || expr_needs_runtime(mapper)
+        }
+        Expr::ArrayFilterValue { value, predicate }
+        | Expr::ArrayFindValue { value, predicate }
+        | Expr::ArrayAnyValue { value, predicate }
+        | Expr::ArrayAllValue { value, predicate } => {
+            expr_needs_runtime(value) || expr_needs_runtime(predicate)
+        }
+        Expr::ArrayFold {
+            initial, reducer, ..
+        } => expr_needs_runtime(initial) || expr_needs_runtime(reducer),
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => {
+            expr_needs_runtime(value) || expr_needs_runtime(initial) || expr_needs_runtime(reducer)
+        }
         Expr::IfElse {
             condition,
             then_expr,

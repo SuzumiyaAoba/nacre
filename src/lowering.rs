@@ -530,6 +530,64 @@ fn lower_expr(expr: &Expr, functions: &HashSet<String>) -> Expr {
             value: Box::new(lower_expr(value, functions)),
             mapper: Box::new(lower_expr(mapper, functions)),
         },
+        Expr::ArrayFilter { name, predicate } => Expr::ArrayFilter {
+            name: name.clone(),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayFilterValue { value, predicate } => Expr::ArrayFilterValue {
+            value: Box::new(lower_expr(value, functions)),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayFlatMap { name, mapper } => Expr::ArrayFlatMap {
+            name: name.clone(),
+            mapper: Box::new(lower_expr(mapper, functions)),
+        },
+        Expr::ArrayFlatMapValue { value, mapper } => Expr::ArrayFlatMapValue {
+            value: Box::new(lower_expr(value, functions)),
+            mapper: Box::new(lower_expr(mapper, functions)),
+        },
+        Expr::ArrayFind { name, predicate } => Expr::ArrayFind {
+            name: name.clone(),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayFindValue { value, predicate } => Expr::ArrayFindValue {
+            value: Box::new(lower_expr(value, functions)),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayAny { name, predicate } => Expr::ArrayAny {
+            name: name.clone(),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayAnyValue { value, predicate } => Expr::ArrayAnyValue {
+            value: Box::new(lower_expr(value, functions)),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayAll { name, predicate } => Expr::ArrayAll {
+            name: name.clone(),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayAllValue { value, predicate } => Expr::ArrayAllValue {
+            value: Box::new(lower_expr(value, functions)),
+            predicate: Box::new(lower_expr(predicate, functions)),
+        },
+        Expr::ArrayFold {
+            name,
+            initial,
+            reducer,
+        } => Expr::ArrayFold {
+            name: name.clone(),
+            initial: Box::new(lower_expr(initial, functions)),
+            reducer: Box::new(lower_expr(reducer, functions)),
+        },
+        Expr::ArrayFoldValue {
+            value,
+            initial,
+            reducer,
+        } => Expr::ArrayFoldValue {
+            value: Box::new(lower_expr(value, functions)),
+            initial: Box::new(lower_expr(initial, functions)),
+            reducer: Box::new(lower_expr(reducer, functions)),
+        },
         Expr::OptionMap { name, mapper } => Expr::OptionMap {
             name: name.clone(),
             mapper: Box::new(lower_expr(mapper, functions)),

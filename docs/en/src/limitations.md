@@ -30,6 +30,11 @@ syntax.
   unreferenced imported function bodies do not require policy capabilities.
   Function-value references count as reachable. Top-level initializers and
   trait implementations are checked conservatively.
+- Sequence helpers over empty array literals need an annotation so the element
+  type can be inferred.
+- Maps currently expose `keys()`, `values()`, `has(...)`, `set(...)`, and
+  `remove(...)`; tuple-oriented `entries()`, `fromEntries(...)`, and
+  `mapValues(...)` need a separate structured-map design.
 - Some structured values use compiler-provided Bash runtime helpers.
 - Diagnostics include line, column, source-line, and caret output. The CLI can
   emit a single diagnostic as JSON with `--diagnostic-format json`, but there is
