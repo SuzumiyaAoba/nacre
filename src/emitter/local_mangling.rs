@@ -429,6 +429,7 @@ pub(super) fn mangle_local_expr(expr: &Expr, local_names: &HashMap<String, Strin
         Expr::AsyncCommand(command) => {
             Expr::AsyncCommand(mangle_shell_interpolations(command, local_names))
         }
+        Expr::Async(value) => Expr::Async(Box::new(mangle_local_expr(value, local_names))),
         Expr::Await(name) => Expr::Await(mangle_local_name(name, local_names)),
         Expr::Pipeline { input, commands } => Expr::Pipeline {
             input: input

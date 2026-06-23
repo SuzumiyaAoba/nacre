@@ -364,6 +364,27 @@ failure should be handled as data. That form returns a `CommandOutput` record
 with `stdout: String`, `stderr: String`, `status: ExitCode`, and
 `success: Bool`.
 
+Policy-approved commands and pure function calls can run concurrently with
+`async`. The expression has type `Future[T]`, where `T` is the wrapped call's
+return type. `await` waits for a future and returns its captured value; command
+failures propagate with the command's exit status.
+
+```nacre
+const left = async run.fetch.user("1")
+const right = async run.fetch.user("2")
+const users = [await left, await right]
+
+fn label(value: String): String {
+    return "label:${value}"
+}
+
+const labeled = async label("nacre")
+const value = await labeled
+```
+
+Raw shell backgrounding remains disabled; `async` accepts only safe approved
+command calls and pure function calls.
+
 ## Operators
 
 Implemented operators include:
@@ -407,7 +428,8 @@ The safe profile rejects:
 - `$sh"..."`, `$sh'...'`, and `$sh{ ... }`
 - Raw Bash blocks
 - Shell pipelines and redirects
-- Background, asynchronous, or spawned shell commands
+- Background, asynchronous, or spawned shell commands outside safe `async`
+  approved-command/function calls
 - `hasCommand(...)`, `require(...)`, and `requireOneOf(...)`
 
 Use a narrowly scoped, reviewed executable in the policy instead.

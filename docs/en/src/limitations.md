@@ -10,6 +10,8 @@ syntax.
 - Ordinary approved command calls do not return structured exit status and
   standard-error values. Use `run.result.<group>.<command>` when those values
   are needed.
+- `async` is limited to policy-approved command calls and pure function calls.
+  Awaited command failures propagate as process exits.
 - Arbitrary shell, pipelines, redirects, background execution, and dynamic
   executable selection are intentionally unavailable.
 

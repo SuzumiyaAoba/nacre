@@ -178,6 +178,7 @@ fn expr_needs_runtime(expr: &Expr) -> bool {
         Expr::Some(value)
         | Expr::Ok(value)
         | Expr::Err(value)
+        | Expr::Async(value)
         | Expr::ResultOption(value)
         | Expr::TryResult(value)
         | Expr::PathExists(value)

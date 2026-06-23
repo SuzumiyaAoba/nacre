@@ -144,6 +144,7 @@ pub(super) fn emit_awk_expr(out: &mut String, expr: &Expr, vars: &mut Vec<(Strin
         | Expr::Command { .. }
         | Expr::CommandResult { .. }
         | Expr::AsyncCommand(_)
+        | Expr::Async(_)
         | Expr::Await(_)
         | Expr::Pipeline { .. }
         | Expr::TryPipeline { .. }

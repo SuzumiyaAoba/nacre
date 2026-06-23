@@ -274,6 +274,7 @@ pub enum Expr {
         write_args: Vec<usize>,
     },
     AsyncCommand(String),
+    Async(Box<Expr>),
     Await(String),
     Pipeline {
         input: Option<Box<Expr>>,

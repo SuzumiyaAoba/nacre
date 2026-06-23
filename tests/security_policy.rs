@@ -251,6 +251,62 @@ fn approved_command_arguments_are_not_evaluated_as_shell() {
 }
 
 #[test]
+fn async_approved_commands_capture_order_and_failures() {
+    let dir = unique_dir();
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("worker");
+    write_executable(
+        &script,
+        "#!/usr/bin/env bash\nset -euo pipefail\nif [[ \"$1\" == fail ]]; then printf 'bad\\n' >&2; exit 7; fi\nsleep \"$2\"\nprintf '%s\\n' \"$1\"\n",
+    );
+    let policy_path = dir.join("policy.toml");
+    fs::write(
+        &policy_path,
+        "[command_groups.jobs.commands.worker]\nprogram = \"worker\"\nargs = 2\n",
+    )
+    .unwrap();
+    let policy = ExecutionPolicy::from_file(&policy_path).unwrap();
+    let mut bash = compile_source_with_policy(
+        r#"
+const slow = async run.jobs.worker("slow", "0.05")
+const fast = async run.jobs.worker("fast", "0")
+const first = await slow
+const second = await fast
+const again = await fast
+"#,
+        &policy,
+    )
+    .unwrap();
+    bash.push_str("\nprintf '%s|%s|%s\\n' \"$first\" \"$second\" \"$again\"\n");
+    let output = run_bash(&bash);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "slow|fast|fast\n"
+    );
+
+    let bash = compile_source_with_policy(
+        r#"
+const job = async run.jobs.worker("fail", "0")
+const value = await job
+"#,
+        &policy,
+    )
+    .unwrap();
+    let output = run_bash(&bash);
+    assert_eq!(output.status.code(), Some(7));
+
+    let unsafe_async = compile_source("const job = async $sh\"printf unsafe\"").unwrap_err();
+    assert!(unsafe_async.message().contains("unsafe shell execution"));
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn runtime_guards_reject_paths_outside_roots() {
     let dir = unique_dir();
     let allowed = dir.join("allowed");

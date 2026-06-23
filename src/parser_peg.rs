@@ -2308,6 +2308,7 @@ peg::parser! {
             = do_expr()
             / if_expr()
             / match_expr()
+            / "async" ws1() value:postfix() { Expr::Async(Box::new(value)) }
             / "async" ws1() command:shell_command() { Expr::AsyncCommand(command) }
             / "spawn" ws1() command:shell_command() { Expr::AsyncCommand(command) }
             / "await" ws1() name:identifier() { Expr::Await(name) }

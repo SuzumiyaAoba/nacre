@@ -387,6 +387,7 @@ fn collect_expr_function_refs(
         Expr::Some(value)
         | Expr::Ok(value)
         | Expr::Err(value)
+        | Expr::Async(value)
         | Expr::ResultOption(value)
         | Expr::TryResult(value)
         | Expr::PathExists(value)
@@ -851,6 +852,7 @@ impl TypeChecker {
             | Expr::Err(value)
             | Expr::ResultOption(value)
             | Expr::PathExists(value)
+            | Expr::Async(value)
             | Expr::ArrayLenValue(value)
             | Expr::MapLenValue(value)
             | Expr::ArrayIsEmptyValue(value)
@@ -3557,6 +3559,7 @@ impl TypeChecker {
                         .unwrap_or_default(),
                 })
             }
+            Expr::Async(value) => Ok(Expr::Async(Box::new(self.lower_expr(value, line)?))),
             Expr::Call { name, args } => {
                 if self.variants.contains_key(name) {
                     return Ok(Expr::Variant {
@@ -4877,6 +4880,7 @@ impl TypeChecker {
                 result,
                 ..
             } => self.check_allowed_command(group, command, args, *result, line),
+            Expr::Async(value) => self.check_async(value, line),
             Expr::HasCommand(_) => Err(CompileError::new(
                 line,
                 "`hasCommand` is disabled; declare executables in the external policy and call them through `run.<group>.<command>(...)`".to_string(),
@@ -5546,6 +5550,26 @@ impl TypeChecker {
             other => Err(CompileError::new(
                 line,
                 format!("await expects Future, found {}", other.name()),
+            )),
+        }
+    }
+
+    fn check_async(&self, value: &Expr, line: usize) -> Result<Type, CompileError> {
+        match value {
+            Expr::AllowedCommand { .. } | Expr::Call { .. } => {
+                let value_ty = self.check_expr(value, line)?;
+                Ok(Type::Future(Box::new(value_ty)))
+            }
+            Expr::Command { .. }
+            | Expr::CommandResult { .. }
+            | Expr::AsyncCommand(_)
+            | Expr::Pipeline { .. }
+            | Expr::TryPipeline { .. }
+            | Expr::PipelineResult { .. } => Err(unsafe_execution_error(line)),
+            _ => Err(CompileError::new(
+                line,
+                "async only supports policy-approved command calls and pure function calls"
+                    .to_string(),
             )),
         }
     }
@@ -9759,6 +9783,7 @@ fn expr_uses_process_args(expr: &Expr) -> bool {
         Expr::Some(value)
         | Expr::Ok(value)
         | Expr::Err(value)
+        | Expr::Async(value)
         | Expr::ResultOption(value)
         | Expr::TryResult(value)
         | Expr::PathExists(value)

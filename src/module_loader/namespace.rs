@@ -972,6 +972,12 @@ fn namespace_expr(
             )),
         },
         Expr::AsyncCommand(_) => expr.clone(),
+        Expr::Async(value) => Expr::Async(Box::new(namespace_expr(
+            value,
+            context,
+            local_names,
+            local_type_names,
+        ))),
         Expr::CommandResult { .. } => expr.clone(),
         Expr::AllowedCommand {
             group,

@@ -476,6 +476,7 @@ fn lower_expr(expr: &Expr, functions: &HashSet<String>) -> Expr {
             Expr::MatchGuardResult(Box::new(lower_expr(value, functions)))
         }
         Expr::Some(value) => Expr::Some(Box::new(lower_expr(value, functions))),
+        Expr::Async(value) => Expr::Async(Box::new(lower_expr(value, functions))),
         Expr::Ok(value) => Expr::Ok(Box::new(lower_expr(value, functions))),
         Expr::Err(value) => Expr::Err(Box::new(lower_expr(value, functions))),
         Expr::ResultOption(value) => Expr::ResultOption(Box::new(lower_expr(value, functions))),

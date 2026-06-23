@@ -798,6 +798,25 @@ profile.tags[1] = "tests"
 }
 
 #[test]
+fn generated_bash_runs_async_pure_functions() {
+    let output = run_source(
+        r#"
+fn label(value: String): String {
+return "label:${value}"
+}
+
+const left = async label("left")
+const right = async label("right")
+const result = (await right) ++ ":" ++ (await left)
+"#,
+        "printf '%s\\n' \"$result\"",
+        &[],
+    );
+
+    assert_eq!(stdout(output), "label:right:label:left\n");
+}
+
+#[test]
 fn generated_bash_runs_option_result_failure_paths_and_applicatives() {
     let output = run_source(
         r#"
