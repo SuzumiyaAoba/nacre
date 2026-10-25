@@ -1,3 +1,4 @@
+use crate::symbols::is_identifier;
 use std::collections::HashSet;
 
 use crate::{Expr, MatchArm, Program, Statement};
@@ -871,7 +872,7 @@ fn lower_call(name: &str, args: &[Expr], functions: &HashSet<String>) -> Expr {
             args: lowered_args,
         };
     };
-    if !is_valid_name(receiver) || !is_valid_name(method) {
+    if !is_identifier(receiver) || !is_identifier(method) {
         return Expr::Call {
             name: name.to_string(),
             args: lowered_args,
@@ -885,15 +886,6 @@ fn lower_call(name: &str, args: &[Expr], functions: &HashSet<String>) -> Expr {
         name: method.to_string(),
         args,
     }
-}
-
-fn is_valid_name(input: &str) -> bool {
-    let mut chars = input.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
@@ -1011,6 +1003,6 @@ const loud = name.shout()
             names,
             vec!["bad-receiver.method", "receiver.bad-method", ".method", ""]
         );
-        assert!(!is_valid_name(""));
+        assert!(!is_identifier(""));
     }
 }

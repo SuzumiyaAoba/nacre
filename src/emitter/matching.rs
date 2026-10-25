@@ -1,16 +1,13 @@
-use crate::{Expr, MatchArm, Type};
-
+use super::expressions::{emit_call_arg, emit_condition, emit_expr};
 use super::match_analysis::{
     constructor_record_match_fields, constructor_tuple_match_width, has_constructor_match_pattern,
     record_match_fields, tuple_match_width, variant_match_width,
 };
 use super::quoting::emit_shell_word;
 use super::shell::{emit_pipeline, emit_shell_command};
-use super::value_layout::{is_scalar_backed_type, value_suffixes};
-use super::{
-    constructor_record_fields, constructor_tuple_values, emit_array_element, emit_call_arg,
-    emit_condition, emit_expr,
-};
+use super::values::{constructor_record_fields, constructor_tuple_values, emit_array_element};
+use crate::value_layout::{is_scalar_backed_type, value_suffixes};
+use crate::{Expr, MatchArm, Type};
 
 pub(super) fn emit_match_expr(out: &mut String, value: &Expr, arms: &[MatchArm]) {
     let propagating_guard = arms

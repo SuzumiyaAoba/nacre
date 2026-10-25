@@ -18,33 +18,27 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut diagnostic_format = DiagnosticFormat::Text;
     let mut write_lock = false;
     let mut positional = Vec::new();
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
             "--policy" => {
-                let Some(path) = args.get(index + 1) else {
+                let Some(path) = args.next() else {
                     return Err(usage());
                 };
-                policy = nacre::ExecutionPolicy::from_file(Path::new(path))
+                policy = nacre::ExecutionPolicy::from_file(Path::new(&path))
                     .map_err(|error| format_error(error, diagnostic_format))?;
-                index += 2;
             }
             "--diagnostic-format" => {
-                let Some(format) = args.get(index + 1) else {
+                let Some(format) = args.next() else {
                     return Err(usage());
                 };
-                diagnostic_format = DiagnosticFormat::parse(format)?;
-                index += 2;
+                diagnostic_format = DiagnosticFormat::parse(&format)?;
             }
             "--write-lock" => {
                 write_lock = true;
-                index += 1;
             }
             arg if arg.starts_with("--") => return Err(usage()),
-            _ => {
-                positional.push(args[index].clone());
-                index += 1;
-            }
+            _ => positional.push(arg),
         }
     }
 
@@ -56,20 +50,18 @@ fn run(args: Vec<String>) -> Result<(), String> {
             .map_err(|error| format_error(error, diagnostic_format))?;
     }
 
-    match positional.as_slice() {
-        [input] => {
-            let output = nacre::compile_file_with_policy(Path::new(input), &policy)
-                .map_err(|error| format_error(error, diagnostic_format))?;
-            print!("{output}");
-            Ok(())
-        }
-        [input, output] => {
-            let compiled = nacre::compile_file_with_policy(Path::new(input), &policy)
-                .map_err(|error| format_error(error, diagnostic_format))?;
-            fs::write(output, compiled)
-                .map_err(|error| format!("failed to write {output}: {error}"))
-        }
-        _ => Err(usage()),
+    let (input, output) = match positional.as_slice() {
+        [input] => (input, None),
+        [input, output] => (input, Some(output)),
+        _ => return Err(usage()),
+    };
+    let compiled = nacre::compile_file_with_policy(Path::new(input), &policy)
+        .map_err(|error| format_error(error, diagnostic_format))?;
+    if let Some(output) = output {
+        fs::write(output, compiled).map_err(|error| format!("failed to write {output}: {error}"))
+    } else {
+        print!("{compiled}");
+        Ok(())
     }
 }
 

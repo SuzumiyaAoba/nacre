@@ -120,6 +120,55 @@ mutable = 2
 }
 
 #[test]
+fn bash_reserved_function_names_work_as_calls_and_values() {
+    let output = run_source(
+        r#"
+fn time(value: String): String {
+return value
+}
+const direct = time("two words")
+const callable = time
+const indirect = callable("$literal; *")
+"#,
+        "printf '%s|%s\\n' \"$direct\" \"$indirect\"",
+        &[],
+    );
+    assert_eq!(stdout(output), "two words|$literal; *\n");
+
+    let error = nacre::compile_source(
+        r#"
+fn time(): Int {
+return 1
+}
+fn __nacre_keyword_time(): Int {
+return 2
+}
+"#,
+    )
+    .unwrap_err();
+    assert!(error.message().contains("after Bash name mangling"));
+}
+
+#[test]
+fn closures_preserve_captured_composite_storage() {
+    let output = run_source(
+        r#"
+const user = { name: "Ada Lovelace", position: (3, 5) }
+const labels = ["first value", "$literal; *"]
+const describe: Int => String = index => user.name ++ ":" ++ labels[index]
+const first = describe(0)
+const second = describe(1)
+"#,
+        "printf '%s|%s\\n' \"$first\" \"$second\"",
+        &[],
+    );
+    assert_eq!(
+        stdout(output),
+        "Ada Lovelace:first value|Ada Lovelace:$literal; *\n"
+    );
+}
+
+#[test]
 fn public_api_reports_representative_type_errors() {
     let cases = [
         ("const x = 1\nconst x = 2", "already defined"),

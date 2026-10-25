@@ -1140,14 +1140,7 @@ fn mangle_interpolation_ref(value: &str, local_names: &HashMap<String, String>) 
 }
 
 pub(super) fn sanitize_shell_ident(name: &str) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch == '_' || ch.is_ascii_alphanumeric() {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
+    let mut out = crate::symbols::sanitize_symbol(name);
     if out.is_empty() {
         out.push('_');
     }

@@ -1,9 +1,23 @@
+use super::arithmetic::emit_awk_expr;
+use super::async_values::{emit_async_binding, emit_await_binding};
+use super::bindings::{emit_assignment, emit_binding};
+use super::control_flow::emit_for_iterable;
+use super::expressions::{emit_bound_expr, emit_call_arg, emit_expr};
 use super::local_mangling::{
     mangle_call_name, mangle_local_expr, mangle_local_name, mangle_local_statement,
     mangle_shell_interpolations, sanitize_shell_ident, LocalMangler,
 };
-use super::*;
-use crate::{compile_source, compile_source_with_policy, parse, ExecutionPolicy, MatchArm, Type};
+use super::matching::emit_match_pattern;
+use super::quoting::{emit_awk_string, emit_interpolated_string};
+use super::values::{
+    emit_array_element, emit_index_expr, emit_map_key, emit_record_value, emit_tuple_value,
+};
+use super::{emit_expr_statement, transpile};
+use crate::policy::ExecutionPolicy;
+use crate::symbols::is_identifier;
+use crate::{
+    compile_source, compile_source_with_policy, parse, Expr, MatchArm, Program, Statement, Type,
+};
 
 fn env_policy(names: &[&str]) -> ExecutionPolicy {
     let read = names
@@ -255,7 +269,7 @@ fn helper_emitters_cover_edge_case_shapes() {
     assert_eq!(out, "7\n");
     assert_eq!(sanitize_shell_ident("bad-name"), "bad_name");
     assert_eq!(sanitize_shell_ident(""), "_");
-    assert!(!is_shell_name(""));
+    assert!(!is_identifier(""));
 
     let mut locals = HashMap::new();
     locals.insert("value".to_string(), "__local_value".to_string());

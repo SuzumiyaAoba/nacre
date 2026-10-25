@@ -1,6 +1,5 @@
+use super::expressions::emit_expr;
 use crate::Expr;
-
-use super::emit_expr;
 
 pub(super) fn emit_pipeline_capture(out: &mut String, input: Option<&Expr>, commands: &[String]) {
     out.push_str("\"$(");

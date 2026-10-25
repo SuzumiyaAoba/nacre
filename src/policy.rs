@@ -1,3 +1,4 @@
+use crate::symbols::is_identifier;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -364,12 +365,7 @@ fn canonical_roots(
 }
 
 fn validate_identifier(value: &str, kind: &str) -> Result<(), CompileError> {
-    let mut chars = value.chars();
-    if !chars
-        .next()
-        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-        || !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    {
+    if !is_identifier(value) {
         return Err(CompileError::new(
             0,
             format!("invalid {kind} name `{value}`"),

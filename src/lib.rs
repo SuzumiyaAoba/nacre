@@ -7,8 +7,9 @@ mod error;
 mod lowering;
 mod module_loader;
 mod parser;
-mod parser_peg;
 mod policy;
+mod symbols;
+mod value_layout;
 
 use std::path::Path;
 

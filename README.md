@@ -39,6 +39,24 @@ documentation, and project information.
 
 All code in this repository was developed by a Coding Agent.
 
+## Compiler Structure
+
+`src/lib.rs` coordinates parsing, module expansion, type checking and lowering,
+and Bash generation. The public library API is re-exported from this file.
+
+- `src/parser/` separates the PEG grammar, AST construction, validation, and
+  diagnostics. `src/ast.rs` defines the shared syntax and types.
+- `src/module_loader/` handles package manifests and lockfiles separately from
+  imported symbol namespacing.
+- `src/checker/` groups semantic checks and lowering by language feature. The
+  parent module owns checker state and statement dispatch.
+- `src/lowering.rs` resolves method-call syntax before `src/emitter/` generates
+  Bash using modules for control flow, values, collections, commands, and runtime
+  support.
+- `src/symbols.rs` and `src/value_layout.rs` keep naming and shell storage rules
+  consistent between checking and generation. `src/policy.rs` validates execution
+  capabilities, and `src/error.rs` formats diagnostics.
+
 ## Verification
 
 ```bash

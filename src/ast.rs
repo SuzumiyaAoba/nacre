@@ -738,6 +738,19 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    pub(crate) fn qualified_name(&self) -> Option<String> {
+        match self {
+            Self::Ident(name) => Some(name.clone()),
+            Self::Field { name, field } => Some(format!("{name}.{field}")),
+            Self::FieldValue { value, field } => {
+                value.qualified_name().map(|name| format!("{name}.{field}"))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,

@@ -1,6 +1,6 @@
 use crate::{CompileError, Expr, Program, Statement, Type};
 
-use super::names::is_valid_name;
+use crate::symbols::is_identifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FlowSummary {
@@ -164,19 +164,19 @@ pub(super) fn interpolation_names(value: &str, line: usize) -> Result<Vec<String
 }
 
 fn interpolation_base_name(value: &str) -> Option<&str> {
-    if is_valid_name(value) {
+    if is_identifier(value) {
         return Some(value);
     }
     if let Some((base, index)) = value
         .strip_suffix(']')
         .and_then(|value| value.split_once('['))
     {
-        if is_valid_name(base) && !index.is_empty() {
+        if is_identifier(base) && !index.is_empty() {
             return Some(base);
         }
     }
     if let Some((base, field)) = value.split_once('.') {
-        if is_valid_name(base) && (is_valid_name(field) || tuple_field_name(field)) {
+        if is_identifier(base) && (is_identifier(field) || tuple_field_name(field)) {
             return Some(base);
         }
     }

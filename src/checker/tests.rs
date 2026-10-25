@@ -1,5 +1,10 @@
-use super::*;
-use crate::parse;
+use super::names::{impl_method_name, method_call_parts};
+use super::type_utils::substitute_generics;
+use super::{type_check_and_lower_with_policy, FunctionSig, TypeChecker};
+use crate::policy::ExecutionPolicy;
+use crate::symbols::is_identifier;
+use crate::{parse, type_check, Expr, Param, Program, Statement, TraitMethod, Type, TypeParam};
+use std::collections::{HashMap, HashSet};
 
 fn env_policy() -> ExecutionPolicy {
     ExecutionPolicy::from_toml(
@@ -578,7 +583,7 @@ fn checker_helpers_cover_generic_substitution_shapes() {
             field: "field".into(),
         }
     );
-    assert!(!is_valid_name(""));
+    assert!(!is_identifier(""));
     assert_eq!(method_call_parts("value."), None);
 
     assert!(checker

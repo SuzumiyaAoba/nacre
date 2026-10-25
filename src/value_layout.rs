@@ -1,6 +1,8 @@
+//! Shell storage layout shared by closure capture and code generation.
+
 use crate::Type;
 
-pub(super) fn value_suffixes(ty: &Type) -> Vec<String> {
+pub(crate) fn value_suffixes(ty: &Type) -> Vec<String> {
     fn append(prefix: &str, ty: &Type, suffixes: &mut Vec<String>) {
         match ty {
             Type::Record(fields) => {
@@ -38,7 +40,7 @@ pub(super) fn value_suffixes(ty: &Type) -> Vec<String> {
     suffixes
 }
 
-pub(super) fn is_scalar_backed_type(ty: &Type) -> bool {
+pub(crate) fn is_scalar_backed_type(ty: &Type) -> bool {
     match ty {
         Type::Array(_) | Type::Map(_, _) | Type::Record(_) | Type::Tuple(_) => false,
         Type::Applied(_, args) | Type::Union(args) | Type::Intersection(args) => {
